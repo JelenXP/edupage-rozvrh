@@ -27,8 +27,14 @@ def run_tray(
     on_open_log: Callable[[], None],
     on_show_timetable: Callable[[], None],
     on_restart: Callable[[], None],
+    on_settings: Callable[[], None] = None,
+    ready: Callable[[object], None] = None,
 ) -> None:
-    """Zobrazi ikonu a blokuje az do 'Ukoncit'. Musi bezet na hlavnim vlakne."""
+    """Zobrazi ikonu a blokuje az do 'Ukoncit'. Musi bezet na hlavnim vlakne.
+
+    `ready(icon)` se zavola po vytvoreni ikony - daemon si tak drzi referenci,
+    aby ji mohl zastavit i pri restartu z jineho vlakna (nastaveni, auto-update).
+    """
     import pystray
     from pystray import Menu, MenuItem
 
@@ -38,12 +44,16 @@ def run_tray(
     def _fetch(icon, _item):
         on_fetch_now()
 
+    def _settings(icon, _item):
+        if on_settings is not None:
+            on_settings()
+
     def _log(icon, _item):
         on_open_log()
 
     def _restart(icon, _item):
-        icon.visible = False
-        icon.stop()  # ukonci run() -> main dobehne a proces skonci (uvolni mutex)
+        # Ikonu zastavi az on_restart (daemon), aby byl restart z tray i odjinud
+        # (nastaveni, auto-update) uplne stejny.
         on_restart()
 
     def _quit(icon, _item):
@@ -57,10 +67,13 @@ def run_tray(
         "EduPage rozvrh",
         menu=Menu(
             MenuItem("Zobrazit rozvrh", _timetable, default=True),
+            MenuItem("Nastavení", _settings),
             MenuItem("Stáhnout teď", _fetch),
             MenuItem("Restart", _restart),
             MenuItem("Otevřít log", _log),
             MenuItem("Ukončit", _quit),
         ),
     )
+    if ready is not None:
+        ready(icon)  # predej referenci daemonu (pro restart z jineho vlakna)
     icon.run()

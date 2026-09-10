@@ -100,19 +100,43 @@ _TEMPLATE = r"""<!doctype html>
              background: #eef4ff; color: #1f4e8c; border: 1px solid #cddcfa; font-size: 14px; }
   .newfeat.show { display: flex; align-items: center; gap: 10px; }
   .newfeat code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }
+  .newfeat .more { color: inherit; opacity: .75; font-size: 13px; }
   .newfeat .x { margin-left: auto; border: none; background: transparent; color: inherit;
                 font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px; }
   @media (prefers-color-scheme: dark) {
     .newfeat { background: #1b2a44; color: #a9c8f0; border-color: #2b3f5f; }
     .newfeat code { background: rgba(255,255,255,.1); }
   }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+           display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .modal-card { background: #fff; color: #1a1a1a; border-radius: 14px; padding: 22px 24px;
+                width: min(460px, 92vw); box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+  .modal-card h2 { margin: 0 0 14px; font-size: 20px; }
+  .opt { display: flex; align-items: flex-start; gap: 9px; margin: 12px 0; font-size: 15px; }
+  .opt input[type=checkbox] { width: 18px; height: 18px; margin-top: 1px; flex: none; }
+  .opt small { color: #6b7280; }
+  .opt.sub { flex-direction: column; gap: 5px; margin: 6px 0 12px 27px; }
+  .opt.sub input[type=text] { width: 100%; padding: 7px 9px; border: 1px solid #cbd0d8;
+                              border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+  .modal-actions { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+  .modal-actions #settingsStatus { margin-right: auto; color: #2f5d2f; font-size: 13px; }
+  .modal-actions button { padding: 8px 16px; border-radius: 8px; border: 1px solid #cbd0d8;
+                          background: #f3f4f6; cursor: pointer; font-size: 14px; }
+  .modal-actions button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  @media (prefers-color-scheme: dark) {
+    .modal-card { background: #1e2233; color: #e6e6ee; }
+    .opt small { color: #9aa3b2; }
+    .opt.sub input[type=text] { background: #12151f; color: #e6e6ee; border-color: #3a4052; }
+    .modal-actions button { background: #2a2f42; color: #e6e6ee; border-color: #3a4052; }
+    .modal-actions button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .modal-actions #settingsStatus { color: #7bd39a; }
+  }
 </style>
 </head>
 <body>
 <div id="newfeat" class="newfeat">
-  <span>✨ <b>Nová funkce:</b> notifikace na nové známky (vpravo nahoře). Zapni v
-  <code>config.json</code>: <code>"notify_grades": true</code> a restartuj daemon
-  (ikona v liště → Restart).</span>
+  <span id="newfeatText"></span>
+  <span id="newfeatMore" class="more"></span>
   <button class="x" id="newfeatClose" title="Zavřít" aria-label="Zavřít">&times;</button>
 </div>
 <header>
@@ -121,10 +145,34 @@ _TEMPLATE = r"""<!doctype html>
   <button id="today">Dnes</button>
   <button id="next">Další &#9654;</button>
   <button id="refresh" title="Aktualizuje všechny týdny od tohoto týdne po zobrazený">⟳ Aktualizovat</button>
+  <button id="settingsBtn" title="Nastavení">⚙ Nastavení</button>
   <span class="range" id="range"></span>
   <span class="range" id="updated"></span>
 </header>
 <div class="wrap"><div id="grid"></div></div>
+
+<div id="settingsModal" class="modal" hidden>
+  <div class="modal-card">
+    <h2>Nastavení</h2>
+    <label class="opt"><input type="checkbox" id="s_notify_next_lesson">
+      <span>Notifikace další hodiny <small>(toast na konci hodiny)</small></span></label>
+    <label class="opt"><input type="checkbox" id="s_notify_grades">
+      <span>Notifikace nových známek <small>(toast při nové známce)</small></span></label>
+    <label class="opt"><input type="checkbox" id="s_open_folders">
+      <span>Otevírat složky předmětů <small>(při začátku hodiny)</small></span></label>
+    <div class="opt sub" id="foldersRow">
+      <label for="s_folders_base">Cesta ke složkám předmětů:</label>
+      <input type="text" id="s_folders_base" placeholder="C:\\cesta\\ke\\slozkam">
+    </div>
+    <label class="opt"><input type="checkbox" id="s_auto_update">
+      <span>Automatické aktualizace programu <small>(doporučeno)</small></span></label>
+    <div class="modal-actions">
+      <span id="settingsStatus"></span>
+      <button id="settingsCancel">Zrušit</button>
+      <button id="settingsSave" class="primary">Uložit</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const LESSONS = __LESSONS__;
@@ -542,19 +590,99 @@ initStatus();
   } catch (e) {}
 })();
 
-// Upozorneni na novou funkci - ukaz, dokud ho uzivatel nezavre (pamatuje se).
-(function () {
-  const FEAT = "feat_notify_grades_v1";
-  try { if (localStorage.getItem(FEAT)) return; } catch (e) {}
+// --- Oznameni o novych funkcich ---------------------------------------------
+// Seznam se PRIDAVA (nova funkce = novy zaznam). Ukaze se ale vzdy jen JEDEN
+// radek (nejnovejsi nezavreny) + pocet dalsich - i po preskoceni vic verzi to
+// nezahlti obrazovku. Krizek zavre aktualni a ukaze dalsi.
+const ANNOUNCEMENTS = [
+  { id: "notify_grades_v1",
+    html: '✨ <b>Nová funkce:</b> notifikace na nové známky. Zapni v <b>⚙ Nastavení</b>.' },
+];
+function annDismissed(id) {
+  try { return !!localStorage.getItem("feat_" + id); } catch (e) { return false; }
+}
+function renderAnnouncement() {
   const bar = document.getElementById("newfeat");
   if (!bar) return;
+  const left = ANNOUNCEMENTS.filter(a => !annDismissed(a.id));
+  if (!left.length) { bar.classList.remove("show"); return; }
+  const cur = left[left.length - 1];  // nejnovejsi nezavreny
+  document.getElementById("newfeatText").innerHTML = cur.html;
+  document.getElementById("newfeatMore").textContent =
+    left.length > 1 ? "(+" + (left.length - 1) + " další)" : "";
   bar.classList.add("show");
-  const btn = document.getElementById("newfeatClose");
-  if (btn) btn.onclick = () => {
-    bar.classList.remove("show");
-    try { localStorage.setItem(FEAT, "1"); } catch (e) {}
+  document.getElementById("newfeatClose").onclick = () => {
+    try { localStorage.setItem("feat_" + cur.id, "1"); } catch (e) {}
+    renderAnnouncement();  // ukaz dalsi nezavreny, nebo skryj
   };
-})();
+}
+renderAnnouncement();
+
+// --- Nastaveni (panel v rozvrhu) --------------------------------------------
+const SET_KEYS = ["notify_next_lesson", "notify_grades", "open_folders", "auto_update"];
+async function firstConfigPort() {
+  for (const p of PORTS) {
+    try {
+      const r = await fetch("http://127.0.0.1:" + p + "/ping", { mode: "cors" });
+      if (!r.ok) continue;
+      const j = await r.json().catch(() => ({}));
+      if (j.config) return p;
+    } catch (e) {}
+  }
+  return null;
+}
+function toggleFoldersRow() {
+  document.getElementById("foldersRow").style.opacity =
+    document.getElementById("s_open_folders").checked ? "1" : ".5";
+}
+async function openSettings() {
+  const modal = document.getElementById("settingsModal");
+  document.getElementById("settingsStatus").textContent = "";
+  const p = await firstConfigPort();
+  if (p === null) {
+    alert("Nastavení nelze načíst – běží aplikace na pozadí (daemon)?");
+    return;
+  }
+  modal.dataset.port = p;
+  try {
+    const r = await fetch("http://127.0.0.1:" + p + "/config", { mode: "cors" });
+    const c = (await r.json()).config || {};
+    for (const k of SET_KEYS) {
+      const el = document.getElementById("s_" + k);
+      if (el) el.checked = !!c[k];
+    }
+    document.getElementById("s_folders_base").value = c.folders_base || "";
+  } catch (e) {
+    alert("Nastavení se nepodařilo načíst.");
+    return;
+  }
+  toggleFoldersRow();
+  modal.hidden = false;
+}
+function closeSettings() { document.getElementById("settingsModal").hidden = true; }
+async function saveSettings() {
+  const modal = document.getElementById("settingsModal");
+  const status = document.getElementById("settingsStatus");
+  const body = { folders_base: document.getElementById("s_folders_base").value.trim() };
+  for (const k of SET_KEYS) body[k] = document.getElementById("s_" + k).checked;
+  status.textContent = "Ukládám…";
+  try {
+    const r = await fetch("http://127.0.0.1:" + modal.dataset.port + "/set_config",
+      { method: "POST", body: JSON.stringify(body) });
+    const j = await r.json();
+    status.textContent = j.ok ? "Uloženo – aplikace se restartuje…" : "Uložení selhalo.";
+    if (j.ok) setTimeout(closeSettings, 1600);
+  } catch (e) {
+    status.textContent = "Uložení selhalo (offline?).";
+  }
+}
+document.getElementById("settingsBtn").onclick = openSettings;
+document.getElementById("settingsCancel").onclick = closeSettings;
+document.getElementById("settingsSave").onclick = saveSettings;
+document.getElementById("s_open_folders").onchange = toggleFoldersRow;
+document.getElementById("settingsModal").onclick = (e) => {
+  if (e.target.id === "settingsModal") closeSettings();
+};
 </script>
 </body>
 </html>

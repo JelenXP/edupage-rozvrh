@@ -51,6 +51,7 @@ _MUTEX_NAME = "edupage_rozvrh_daemon"
 
 LOG_FILE = core.CACHE_DIR / "daemon.log"
 _SHOW_TOAST = Path(__file__).with_name("show_toast.py")
+_SETTINGS_WINDOW = Path(__file__).with_name("settings_window.py")
 
 
 def _pythonw_path() -> Path:
@@ -399,13 +400,6 @@ def main(argv: list[str]) -> int:
     if restarted:
         logger.info("Daemon restartovan (z tray).")
 
-    # Lokalni server pro tlacitko "Aktualizovat" v rozvrhu.
-    try:
-        import control_server
-        control_server.start(logger)
-    except Exception as e:  # noqa: BLE001 - server je volitelny
-        logger.warning("Control server nespusten: %s", e)
-
     try:
         config = core.load_config()
         open_folders = bool(config.get("open_folders"))
@@ -428,10 +422,13 @@ def main(argv: list[str]) -> int:
 
     stop_event = threading.Event()
     fetch_now_event = threading.Event()
+    tray_ref: dict = {}  # drzi referenci na ikonu (pro restart z jineho vlakna)
 
     def _restart() -> None:
-        # Spusti novou instanci (pocka na uvolneni mutexu) a tuhle ukonci.
-        # Pouziva ho jak tray "Restart", tak auto-update po stazeni nove verze.
+        # Spusti novou instanci (pocka na uvolneni mutexu) a tuhle CISTE ukonci.
+        # Pouziva ho tray "Restart", auto-update i ulozeni nastaveni - proto musi
+        # zastavit i tray ikonu, aby main() dobehl, proces skoncil a uvolnil mutex
+        # (jinak by se nova instance neujala).
         logger.info("Restart daemonu.")
         try:
             subprocess.Popen([str(_PYTHONW), str(Path(__file__)), "--restarted"],
@@ -439,7 +436,22 @@ def main(argv: list[str]) -> int:
         except OSError as e:
             logger.warning("Restart selhal (novou instanci nelze spustit): %s", e)
             return
-        stop_event.set()  # ukonci smycku; tray se zastavi v _restart handleru
+        stop_event.set()  # ukonci smycku
+        icon = tray_ref.get("icon")
+        if icon is not None:
+            try:
+                icon.visible = False
+                icon.stop()  # ukonci run() -> main dobehne a proces skonci
+            except Exception:  # noqa: BLE001
+                pass
+
+    # Lokalni server (Aktualizovat, poznamky, nastaveni). Restart po ulozeni
+    # nastaveni resi callback _restart.
+    try:
+        import control_server
+        control_server.start(logger, on_restart=_restart)
+    except Exception as e:  # noqa: BLE001 - server je volitelny
+        logger.warning("Control server nespusten: %s", e)
 
     # Smycka bezi ve vlakne; hlavni vlakno drzi ikonu v liste (tray).
     loop_thread = threading.Thread(
@@ -479,6 +491,14 @@ def main(argv: list[str]) -> int:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _open_settings() -> None:
+        # Samostatny proces (tkinter) - nekoliduje s pystray na hlavnim vlakne.
+        try:
+            subprocess.Popen([str(_PYTHONW), str(_SETTINGS_WINDOW)],
+                             creationflags=_NO_WINDOW)
+        except OSError as e:
+            logger.warning("Nepodarilo se otevrit nastaveni: %s", e)
+
     try:
         tray_icon.run_tray(
             on_fetch_now=fetch_now_event.set,
@@ -486,6 +506,8 @@ def main(argv: list[str]) -> int:
             on_open_log=_open_log,
             on_show_timetable=_show_timetable,
             on_restart=_restart,
+            on_settings=_open_settings,
+            ready=lambda icon: tray_ref.__setitem__("icon", icon),
         )
     except KeyboardInterrupt:
         stop_event.set()

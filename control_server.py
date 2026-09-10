@@ -77,7 +77,7 @@ class _Server(ThreadingHTTPServer):
     allow_reuse_address = False
 
 
-def _make_handler(logger):
+def _make_handler(logger, on_restart=None):
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes = b"") -> None:
             self.send_response(code)
@@ -125,11 +125,17 @@ def _make_handler(logger):
                         ok = False
                 self._rewrite()
                 self._send(200, b'{"ok":true}' if ok else b'{"ok":false}')
+            elif self.path.startswith("/config"):
+                # Aktualni hodnoty nastavitelnych voleb (pro UI nastaveni).
+                try:
+                    vals = core.get_config_values()
+                except Exception:  # noqa: BLE001
+                    vals = {}
+                self._send(200, json.dumps({"ok": True, "config": vals}).encode())
             elif self.path.startswith("/ping"):
                 # "notes":true = tento daemon umi ukladat poznamky (novy kod).
-                # Stranka podle toho posle /refresh a /save_note na spravny
-                # daemon (kdyby druhy ucet jeste bezel na stare verzi).
-                self._send(200, b'{"ok":true,"notes":true}')
+                # "config":true = umi UI nastaveni (/config, /set_config).
+                self._send(200, b'{"ok":true,"notes":true,"config":true}')
             else:
                 self._send(404)
 
@@ -156,6 +162,22 @@ def _make_handler(logger):
                     "failed": b'{"ok":false}',
                 }
                 self._send(200, bodies.get(status, b'{"ok":false}'))
+            elif self.path.startswith("/set_config"):
+                # Telo JSON: nastavitelne volby (open_folders, notify_*, auto_update,
+                # folders_base). Ulozi do config.json a restartuje daemon, aby se
+                # zmeny projevily. NIKDY nemeni username/password/subdomain.
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b"{}"
+                try:
+                    changes = json.loads(raw.decode("utf-8"))
+                    vals = core.save_config_values(changes if isinstance(changes, dict) else {})
+                    self._send(200, json.dumps({"ok": True, "config": vals}).encode())
+                    # Po odeslani odpovedi restartovat (zmeny se ctou pri startu).
+                    if on_restart is not None:
+                        threading.Timer(0.8, on_restart).start()
+                except (ValueError, TypeError, json.JSONDecodeError, OSError) as e:
+                    logger.warning("Ulozeni nastaveni selhalo: %s", e)
+                    self._send(200, b'{"ok":false}')
             else:
                 self._send(404)
 
@@ -172,9 +194,12 @@ def _make_handler(logger):
     return Handler
 
 
-def start(logger) -> Optional[int]:
-    """Spusti server na prvnim volnem portu z rozsahu. Vrati port, nebo None."""
-    handler = _make_handler(logger)
+def start(logger, on_restart=None) -> Optional[int]:
+    """Spusti server na prvnim volnem portu z rozsahu. Vrati port, nebo None.
+
+    `on_restart` = callback pro restart daemonu po ulozeni nastaveni (/set_config).
+    """
+    handler = _make_handler(logger, on_restart)
     for port in range(core.CONTROL_PORT_BASE,
                        core.CONTROL_PORT_BASE + core.CONTROL_PORT_COUNT):
         try:

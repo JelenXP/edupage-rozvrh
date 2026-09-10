@@ -172,6 +172,42 @@ def _write_config(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+# Klice, ktere smi menit UI nastaveni. username/password/subdomain sem NEpatri -
+# ty UI nikdy nemeni (bezpecnost).
+SETTABLE_KEYS = ("open_folders", "notify_next_lesson", "notify_grades",
+                 "auto_update", "folders_base")
+
+
+def get_config_values(path: Optional[Path] = None) -> dict:
+    """Aktualni hodnoty nastavitelnych voleb (pro UI nastaveni). Nikdy nevraci heslo."""
+    if path is None:
+        path = config_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    return {k: data.get(k, CONFIG_DEFAULTS.get(k, "")) for k in SETTABLE_KEYS}
+
+
+def save_config_values(changes: dict, path: Optional[Path] = None) -> dict:
+    """Ulozi zmenene nastavitelne volby do config.json a vrati aktualni hodnoty.
+
+    Meni jen klice ze SETTABLE_KEYS; ostatni (vcetne username/password/subdomain)
+    necha netknute. Zapis je atomicky a zachova poradi klicu.
+    """
+    if path is None:
+        path = config_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    for k in SETTABLE_KEYS:
+        if k in changes:
+            data[k] = str(changes[k] or "") if k == "folders_base" else bool(changes[k])
+    _write_config(path, data)
+    return {k: data.get(k) for k in SETTABLE_KEYS}
+
+
 def login(config: dict) -> Edupage:
     """Prihlasi se do EduPage. Vyhodi TwoFactorRequired pri 2FA."""
     edupage = Edupage()

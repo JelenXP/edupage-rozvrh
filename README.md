@@ -36,7 +36,9 @@ přes git**.
 - ⚡ **Rychlé stahování** – po 3denních oknech na málo requestů + znovupoužitá
   přihlášená session (aktualizace i ukládání poznámek nečekají na login).
 - 🔄 **Auto-update z GitHubu** – daemon si sám stáhne novou verzi kódu a restartuje se.
-- 🖱️ **Ikona v liště** – *Zobrazit rozvrh / Stáhnout teď / Restart / Otevřít log / Ukončit*.
+- 🖱️ **Ikona v liště** – *Zobrazit rozvrh / Nastavení / Stáhnout teď / Restart / Otevřít log / Ukončit*.
+- ⚙ **Nastavení klikáním** – přepínače funkcí přímo v rozvrhu i v samostatném okně
+  z lišty (bez ručního editování `config.json`).
 
 ---
 
@@ -98,6 +100,13 @@ Soubor `%LOCALAPPDATA%\edupage\config.json` (vzor je `config.example.json`):
 | `notify_next_lesson` | `true` → toast s další hodinou na konci hodiny. |
 | `notify_grades` | `true` → toast při nové známce (vpravo nahoře, 1 min / po odkliknutí). |
 | `auto_update` | `true` → daemon se sám aktualizuje z gitu (doporučeno). |
+
+> **Nemusíš editovat JSON ručně.** Nastavení změníš klikáním:
+> - v rozvrhu tlačítkem **⚙ Nastavení** (přepínače + cesta ke složkám),
+> - nebo přes **ikonu v liště → Nastavení** (samostatné okno).
+>
+> Uložením se změny zapíšou do `config.json` (hesla se nikdy nemění) a daemon se
+> sám restartuje, aby se projevily.
 
 > **Nové klíče se doplní samy.** Chybějící volitelné klíče (např. `notify_grades`
 > po updatu) se při startu automaticky přidají do `config.json` s výchozí hodnotou
@@ -179,6 +188,7 @@ fetch z jednoho účtu tak drží rozvrh čerstvý i pro druhý (i když je zrov
 | `folder_opener.py` | Mapování předmět→složka a otevření probíhající hodiny. |
 | `tray_icon.py` | Ikona v systémové liště (volitelné, `pystray` + `pillow`). |
 | `self_update.py` | Auto-aktualizace kódu z gitu. |
+| `settings_window.py` | Nativní okno nastavení (z lišty → Nastavení). |
 | `setup_user_config.py` | Připraví per-user config v `%LOCALAPPDATA%\edupage\`. |
 | `install_autostart.py` / `uninstall_autostart.py` | (Od)registrace autostartu. |
 | `config.example.json`, `subject_folders.example.json` | Vzory konfigurace. |
