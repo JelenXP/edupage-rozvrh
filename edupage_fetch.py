@@ -626,8 +626,24 @@ def _write_payload(
     tmp.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    # Zaloha predchozi (dobre) verze pred prepisem - kdyby nova byla poskozena.
+    # Puvodni soubor jsme psali vzdy atomicky, takze je platny. Zalohu take
+    # zapiseme atomicky (temp + replace), aby nezustala rozepsana.
+    if path.exists():
+        try:
+            backup = _backup_path(path)
+            btmp = backup.with_suffix(f".{os.getpid()}.baktmp")
+            btmp.write_bytes(path.read_bytes())
+            os.replace(btmp, backup)
+        except OSError:
+            pass  # zaloha je best-effort, nesmi shodit zapis cache
     os.replace(tmp, path)  # atomicka nahrada na stejnem svazku
     return path
+
+
+def _backup_path(path: Path) -> Path:
+    """Cesta k zaloze cache (napr. schedule.json -> schedule.json.bak)."""
+    return path.with_name(path.name + ".bak")
 
 
 def _week_aligned_range(today: Optional[date] = None) -> tuple[date, date]:
@@ -1005,32 +1021,35 @@ def load_fetched_weeks(path: Path = CACHE_FILE) -> list[str]:
 
 def load_fetched_at(path: Path = CACHE_FILE) -> Optional[str]:
     """Vrati cas posledniho stazeni (ISO) z cache, nebo None."""
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    return data.get("fetched_at")
+    return _read_payload(path).get("fetched_at")
 
 
 def load_base(path: Path = CACHE_FILE) -> dict:
     """Nacte staly rozvrh ze sdilene cache. Vrati dict (nebo {} kdyz neni)."""
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-    base = data.get("base")
+    base = _read_payload(path).get("base")
     return base if isinstance(base, dict) else {}
 
 
+def _read_payload(path: Path = CACHE_FILE) -> dict:
+    """Nacte cely payload cache. Kdyz je hlavni soubor poskozeny/necitelny,
+    zkusi zalohu (.bak). Vrati {} jen kdyz selze oboji.
+
+    Diky tomu jednorazove poskozeni cache (napr. pri padu, antiviru ci chybe
+    disku) nezpusobi zmizeni celeho rozvrhu ani ztratu vzdalenych tydnu pri
+    nasledujicim slucovacim zapisu - vezme se posledni dobra verze ze zalohy.
+    """
+    for p in (path, _backup_path(path)):
+        try:
+            if not p.exists():
+                continue
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError):
+            continue  # zkus zalohu
+    return {}
+
+
 def _load_key(path: Path, key: str) -> list[dict]:
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-    return data.get(key, [])
+    value = _read_payload(path).get(key)
+    return value if isinstance(value, list) else []
