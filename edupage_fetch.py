@@ -723,6 +723,49 @@ def fetch_week(monday: date) -> bool:
     return True
 
 
+def refresh_through(target_monday: date) -> bool:
+    """Stahne a slouci VSECHNY tydny od tohoto tydne az po `target_monday` (vcetne).
+
+    Pouziva UI tlacitko "Aktualizovat": obnovi souvisly rozsah do zobrazeneho
+    tydne (vyplni i mezery a prepise zastarale tydny za beznym oknem). Kdyz je
+    cil uvnitr/pred beznym oknem, chova se jako `refresh_cache` (obnovi okno).
+    Tise; pri neuspechu cache neprepisuje. Vrati True pri uspechu.
+    """
+    start, win_end = _week_aligned_range()
+    target_monday = target_monday - timedelta(days=target_monday.weekday())  # zarovnat na pondeli
+    # Konec = patek pozdejsiho z (bezne okno, cilovy tyden). Cil v minulosti -> jen bezne okno.
+    end = win_end if target_monday <= start else max(win_end, target_monday + timedelta(days=4))
+
+    try:
+        edupage = get_session()
+    except Exception:  # noqa: BLE001 - offline / config / 2FA
+        return False
+
+    days = (end - start).days
+
+    def _flush_and_fetch(ep):
+        flush_note_queue(ep)
+        return fetch_schedule(ep, start=start, days_ahead=days)
+
+    entries = _flush_and_fetch(edupage)
+    if not entries:
+        # Mozna vyprsela drzena session -> jeden pokus s cerstvym prihlasenim.
+        try:
+            edupage = get_session(force_new=True)
+        except Exception:  # noqa: BLE001
+            return False
+        entries = _flush_and_fetch(edupage)
+        if not entries:
+            return False
+
+    assignments = fetch_assignments(edupage)
+    try:
+        persist_cache(entries, assignments, refresh_start=start, refresh_end=end)
+    except OSError:
+        return False
+    return True
+
+
 def _person_id_str(user_id: str) -> str:
     """Z 'Student-170' udela '-170' (cislo osoby pouzite ve fieldid poznamky)."""
     p = user_id

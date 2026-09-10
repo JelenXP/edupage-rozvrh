@@ -43,7 +43,18 @@ def _make_handler(logger):
 
         def do_GET(self):  # noqa: N802
             if self.path.startswith("/refresh"):
-                ok = core.refresh_cache()
+                # ?until=YYYY-MM-DD -> obnovi vsechny tydny od tohoto tydne az po
+                # zobrazeny (vcetne mezer); bez parametru jen bezne okno.
+                q = parse_qs(urlparse(self.path).query)
+                until = (q.get("until") or [None])[0]
+                if until:
+                    try:
+                        y, m, d = map(int, until.split("-"))
+                        ok = core.refresh_through(date(y, m, d))
+                    except (ValueError, TypeError):
+                        ok = False
+                else:
+                    ok = core.refresh_cache()
                 self._rewrite()
                 self._send(200, b'{"ok":true}' if ok else b'{"ok":false}')
             elif self.path.startswith("/fetch_week"):

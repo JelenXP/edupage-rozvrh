@@ -100,7 +100,7 @@ _TEMPLATE = r"""<!doctype html>
   <button id="prev">&#9664; Předchozí</button>
   <button id="today">Dnes</button>
   <button id="next">Další &#9654;</button>
-  <button id="refresh">⟳ Aktualizovat</button>
+  <button id="refresh" title="Aktualizuje všechny týdny od tohoto týdne po zobrazený">⟳ Aktualizovat</button>
   <span class="range" id="range"></span>
   <span class="range" id="updated"></span>
 </header>
@@ -203,9 +203,11 @@ async function doRefresh() {
   const btn = document.getElementById("refresh");
   el.textContent = "· aktualizuji…";
   btn.disabled = true;
+  // Obnovit vsechny tydny od tohoto tydne az po zobrazeny (vcetne mezer).
+  const until = fmt(current);
   for (const p of await noteCapablePorts()) {
     try {
-      const r = await fetch(`http://127.0.0.1:${p}/refresh`, { mode: "cors" });
+      const r = await fetch(`http://127.0.0.1:${p}/refresh?until=${until}`, { mode: "cors" });
       if (!r.ok) continue;
       const j = await r.json().catch(() => ({}));
       if (j.ok) { location.reload(); return; }  // stazeno -> prenacti
