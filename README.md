@@ -6,6 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
 ![Postaveno na](https://img.shields.io/badge/postaveno%20na-edupage--api-orange)
 ![Údržba](https://img.shields.io/badge/auto--update-git-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 Daemon každou hodinu stáhne rozvrh do sdílené cache, umí otevírat složky předmětů
 při začátku hodiny, ukazuje toast notifikaci s další hodinou, zobrazuje celý
@@ -193,6 +194,7 @@ fetch z jednoho účtu tak drží rozvrh čerstvý i pro druhý (i když je zrov
 
 ## 📄 Licence
 
-Osobní/školní hobby projekt – volně k použití a úpravám. Postaveno na knihovně
-[edupage-api](https://github.com/EduPage-API/edupage-api). Neoficiální nástroj,
-nijak nesouvisí s provozovatelem EduPage.
+Vydáno pod licencí **MIT** – viz [LICENSE](LICENSE). Volně k použití a úpravám.
+
+Postaveno na knihovně [edupage-api](https://github.com/EduPage-API/edupage-api).
+Neoficiální nástroj, nijak nesouvisí s provozovatelem EduPage.
