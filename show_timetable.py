@@ -96,9 +96,25 @@ _TEMPLATE = r"""<!doctype html>
     .allday.event   { background: #312046; color: #cbb4f2; }
   }
   tr.today .day { background: #eaf1ff; }
+  .newfeat { display: none; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
+             background: #eef4ff; color: #1f4e8c; border: 1px solid #cddcfa; font-size: 14px; }
+  .newfeat.show { display: flex; align-items: center; gap: 10px; }
+  .newfeat code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }
+  .newfeat .x { margin-left: auto; border: none; background: transparent; color: inherit;
+                font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px; }
+  @media (prefers-color-scheme: dark) {
+    .newfeat { background: #1b2a44; color: #a9c8f0; border-color: #2b3f5f; }
+    .newfeat code { background: rgba(255,255,255,.1); }
+  }
 </style>
 </head>
 <body>
+<div id="newfeat" class="newfeat">
+  <span>✨ <b>Nová funkce:</b> notifikace na nové známky (vpravo nahoře). Zapni v
+  <code>config.json</code>: <code>"notify_grades": true</code> a restartuj daemon
+  (ikona v liště → Restart).</span>
+  <button class="x" id="newfeatClose" title="Zavřít" aria-label="Zavřít">&times;</button>
+</div>
 <header>
   <h1>Rozvrh</h1>
   <button id="prev">&#9664; Předchozí</button>
@@ -524,6 +540,20 @@ initStatus();
     const rp = sessionStorage.getItem("refPort");
     if (rp !== null) pollRefresh(+rp);
   } catch (e) {}
+})();
+
+// Upozorneni na novou funkci - ukaz, dokud ho uzivatel nezavre (pamatuje se).
+(function () {
+  const FEAT = "feat_notify_grades_v1";
+  try { if (localStorage.getItem(FEAT)) return; } catch (e) {}
+  const bar = document.getElementById("newfeat");
+  if (!bar) return;
+  bar.classList.add("show");
+  const btn = document.getElementById("newfeatClose");
+  if (btn) btn.onclick = () => {
+    bar.classList.remove("show");
+    try { localStorage.setItem(FEAT, "1"); } catch (e) {}
+  };
 })();
 </script>
 </body>

@@ -183,6 +183,18 @@ def run_once(logger: logging.Logger) -> bool:
         f" ({len(day_errors)} dnu selhalo)" if day_errors else "",
         path,
     )
+
+    # Notifikace na nove znamky (jen kdyz je zapnuto v configu).
+    if bool(config.get("notify_grades")):
+        try:
+            new_grades = core.fetch_new_grades(edupage, logger)
+            for g in new_grades[:5]:  # strop proti zaplaveni notifikacemi
+                _show_toast({"kind": "grade", **g}, logger)
+            if new_grades:
+                logger.info("Nove znamky: %d", len(new_grades))
+        except Exception as e:  # noqa: BLE001 - znamky nesmi shodit fetch
+            logger.warning("Kontrola znamek selhala: %s", e)
+
     return True
 
 
@@ -398,16 +410,19 @@ def main(argv: list[str]) -> int:
         config = core.load_config()
         open_folders = bool(config.get("open_folders"))
         notify = bool(config.get("notify_next_lesson"))
+        notify_grades = bool(config.get("notify_grades"))
         auto_update = bool(config.get("auto_update", True))
     except core.ConfigError as e:
         logger.error("Chyba konfigurace: %s", e)
         return 1
 
     logger.info(
-        "Daemon spusten. Fetch kazdych %d min, otevirani slozek: %s, notifikace: %s, auto-update: %s.",
+        "Daemon spusten. Fetch kazdych %d min, slozky: %s, notifikace hodin: %s, "
+        "notifikace znamek: %s, auto-update: %s.",
         FETCH_INTERVAL_SECONDS // 60,
         "ANO" if open_folders else "NE",
         "ANO" if notify else "NE",
+        "ANO" if notify_grades else "NE",
         "ANO" if auto_update else "NE",
     )
 

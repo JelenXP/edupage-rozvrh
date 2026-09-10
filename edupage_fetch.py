@@ -34,6 +34,9 @@ CACHE_FILE = CACHE_DIR / "schedule.json"
 # aby ji mohl odeslat i daemon druheho uctu (stejny EduPage ucet).
 NOTE_QUEUE_FILE = CACHE_DIR / "note_queue.json"
 
+# Videne znamky (podle event_id) - pro notifikace na NOVE znamky.
+GRADES_SEEN_FILE = CACHE_DIR / "grades_seen.json"
+
 # Config: nejdriv per-user (v profilu uctu), jinak vedle skriptu (sdilena slozka).
 # Diky tomu muze z JEDNE sdilene slozky s kodem bezet vic Windows uctu, kazdy se
 # svym configem - napr. skolni ucet s open_folders=true ma config ve svem profilu
@@ -133,7 +136,40 @@ def load_config(path: Optional[Path] = None) -> dict:
             "config.json obsahuje vzorove hodnoty. Vypln prosim skutecne udaje."
         )
 
-    return data
+    # Doplnit chybejici volitelne klice a ulozit zpet - aby se nove funkce po
+    # updatu objevily v configu a stary config se NEROZBIL (existujici hodnoty a
+    # poradi zustavaji, jen se pridaji nove klice s defaultem). Chrani i budouci
+    # promenne: staci je pridat do CONFIG_DEFAULTS.
+    added = [k for k in CONFIG_DEFAULTS if k not in data]
+    if added:
+        for k in added:
+            data[k] = CONFIG_DEFAULTS[k]
+        try:
+            _write_config(path, data)
+        except OSError:
+            pass  # kdyz nejde zapsat, bezime aspon s doplnenymi defaulty v pameti
+
+    return {**CONFIG_DEFAULTS, **data}
+
+
+# Volitelne klice s vychozimi hodnotami. Chybejici se pri nacteni automaticky
+# doplni do config.json (bez zmeny existujicich hodnot). Sem pridavej KAZDOU
+# novou volitelnou promennou - stary config se pak pri updatu nerozbije a novy
+# klic v nem "naskoci". Povinne username/password/subdomain sem NEpatri.
+CONFIG_DEFAULTS = {
+    "open_folders": False,
+    "notify_next_lesson": False,
+    "notify_grades": False,
+    "auto_update": True,
+}
+
+
+def _write_config(path: Path, data: dict) -> None:
+    """Atomicky ulozi config (zachova existujici hodnoty i poradi klicu)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".{os.getpid()}.cfgtmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def login(config: dict) -> Edupage:
@@ -518,6 +554,76 @@ def fetch_assignments(edupage: Edupage, on_error=None) -> list[AssignmentEntry]:
         out.append(AssignmentEntry(date=day, subject=subject, kind=kind, title=title))
 
     return out
+
+
+def _load_grades_seen() -> list:
+    if not GRADES_SEEN_FILE.exists():
+        return []
+    try:
+        data = json.loads(GRADES_SEEN_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_grades_seen(ids: list) -> None:
+    GRADES_SEEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = GRADES_SEEN_FILE.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(ids, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, GRADES_SEEN_FILE)
+
+
+def _fmt_grade_value(v) -> str:
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v) if v is not None else ""
+
+
+def fetch_new_grades(edupage: Edupage, logger=None) -> list[dict]:
+    """Stahne znamky a vrati POUZE nove od minula (podle event_id).
+
+    Prvni beh (kdyz jeste neexistuje soubor videnych znamek) jen ulozi stavajici
+    jako videne a vrati [] - aby se pri prvnim zapnuti neukazaly notifikace na
+    vsechny stare znamky. Kazda nova znamka je dict pripraveny pro toast.
+    """
+    try:
+        grades = edupage.get_grades() or []
+    except Exception as e:  # noqa: BLE001 - vypadek znamek nesmi shodit fetch
+        if logger is not None:
+            logger.warning("Nepodarilo se stahnout znamky: %s", e)
+        return []
+
+    # subject_name byva jen zkratka -> namapovat na plny nazev predmetu.
+    subj_map: dict = {}
+    try:
+        for s in (edupage.get_subjects() or []):
+            subj_map[s.subject_id] = s.name
+    except Exception:  # noqa: BLE001
+        pass
+
+    current: dict[str, dict] = {}
+    for g in grades:
+        gid = str(g.event_id)
+        current[gid] = {
+            "subject": subj_map.get(g.subject_id) or g.subject_name or "",
+            "value": _fmt_grade_value(g.grade_n),
+            "title": g.title or "",
+            "date": g.date.strftime("%Y-%m-%d") if getattr(g, "date", None) else "",
+            "weight": getattr(g, "importance", None),
+        }
+
+    seen = set(_load_grades_seen())
+    first_run = not GRADES_SEEN_FILE.exists()
+    new_ids = [gid for gid in current if gid not in seen]
+
+    try:
+        _write_grades_seen(sorted(seen | set(current)))
+    except OSError:
+        pass
+
+    if first_run:
+        return []  # jen seed videnych, zadne notifikace
+    return [current[gid] for gid in new_ids]
 
 
 def refresh_cache() -> bool:

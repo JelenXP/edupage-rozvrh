@@ -25,6 +25,8 @@ přes git**.
   hodiny – zapínatelné per účet.
 - 🔔 **Toast notifikace** na konci hodiny s další hodinou (vlastní okno, **mimo**
   centrum oznámení Windows). Zůstane 1 minutu, **zvýrazní změny** a ukáže **poznámku**.
+- 📊 **Notifikace na nové známky** (volitelné, `notify_grades`) – toast vpravo
+  nahoře při nové známce (předmět, hodnota, název, váha).
 - 📝 **Osobní poznámky k hodinám** – čtení i **zápis/úprava/mazání** přímo v
   rozvrhu (ukládají se zpět do EduPage). Offline se zařadí do fronty a odešlou se,
   až bude připojení.
@@ -82,6 +84,7 @@ Soubor `%LOCALAPPDATA%\edupage\config.json` (vzor je `config.example.json`):
   "open_folders": false,
   "folders_base": "C:\\cesta\\ke\\slozkam\\predmetu",
   "notify_next_lesson": false,
+  "notify_grades": false,
   "auto_update": true
 }
 ```
@@ -93,7 +96,12 @@ Soubor `%LOCALAPPDATA%\edupage\config.json` (vzor je `config.example.json`):
 | `open_folders` | `true` → otevírá složku předmětu při hodině. |
 | `folders_base` | Kořenová složka s podsložkami předmětů (jen když `open_folders`). |
 | `notify_next_lesson` | `true` → toast s další hodinou na konci hodiny. |
+| `notify_grades` | `true` → toast při nové známce (vpravo nahoře, 1 min / po odkliknutí). |
 | `auto_update` | `true` → daemon se sám aktualizuje z gitu (doporučeno). |
+
+> **Nové klíče se doplní samy.** Chybějící volitelné klíče (např. `notify_grades`
+> po updatu) se při startu automaticky přidají do `config.json` s výchozí hodnotou
+> `false` – existující hodnoty ani pořadí se nemění, starý config se nerozbije.
 
 Volitelně `%LOCALAPPDATA%\edupage\subject_folders.json` – ruční mapování jen těch
 předmětů, jejichž složka se **nejmenuje stejně** jako předmět (zbytek se páruje 1:1).

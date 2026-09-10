@@ -97,6 +97,8 @@ def _build_header(data: dict) -> str:
         return "Konec vyučování"
     if kind == "text":
         return data.get("header", "")
+    if kind == "grade":
+        return "📊 Nová známka"
     return f"Další hodina začíná v {data.get('start', '?')}"
 
 
@@ -157,6 +159,19 @@ def show(data: dict, duration_s: int) -> None:
             b_item = canvas.create_text(PAD, y, text=body, fill=FG, font=font,
                                         width=text_w, anchor="nw", justify="left")
             y = canvas.bbox(b_item)[3]
+    elif data.get("kind") == "grade":
+        row("Předmět:", data.get("subject") or "?", False)
+        row("Známka:", data.get("value") or "?", True)  # zvyraznene (vypichnout)
+        title = data.get("title")
+        if title:
+            row("Za:", title, False)
+        weight = data.get("weight")
+        try:
+            w = float(weight)
+            if w and w != 1.0:  # vahu ukaz jen kdyz neni bezna (1)
+                row("Váha:", str(int(w)) if w.is_integer() else str(w), False)
+        except (TypeError, ValueError):
+            pass
     elif data.get("kind") != "end":
         changes = set(data.get("changes") or [])
         row("Předmět:", data.get("subject", "?"), "subject" in changes)
