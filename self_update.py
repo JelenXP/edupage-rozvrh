@@ -22,6 +22,10 @@ from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent
 
+# Na Windows daemon bezi pod pythonw.exe (bez konzole). Kdyz z nej spustime
+# git.exe, na okamzik problikne cerne okno cmd. CREATE_NO_WINDOW to potlaci.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 def _git(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -29,6 +33,7 @@ def _git(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=timeout,
+        creationflags=_NO_WINDOW,
     )
 
 

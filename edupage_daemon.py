@@ -62,6 +62,9 @@ def _pythonw_path() -> Path:
 
 _PYTHONW = _pythonw_path()
 
+# Potlaci probliknuti konzoloveho okna, kdyby _PYTHONW spadl na python.exe.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 def acquire_single_instance(retries: int = 0, delay: float = 0.5) -> bool:
     """Zajisti, ze bezi jen jedna instance daemonu. Vrati False pokud uz bezi.
@@ -245,7 +248,8 @@ def _show_toast(data: dict, logger: logging.Logger) -> None:
         json.dump(data, tmp, ensure_ascii=False)
         tmp.close()
         subprocess.Popen(
-            [str(_PYTHONW), str(_SHOW_TOAST), tmp.name, str(NOTIFY_DURATION_S)]
+            [str(_PYTHONW), str(_SHOW_TOAST), tmp.name, str(NOTIFY_DURATION_S)],
+            creationflags=_NO_WINDOW,
         )
     except OSError as e:
         logger.warning("Nepodarilo se zobrazit notifikaci: %s", e)
@@ -415,7 +419,8 @@ def main(argv: list[str]) -> int:
         # Pouziva ho jak tray "Restart", tak auto-update po stazeni nove verze.
         logger.info("Restart daemonu.")
         try:
-            subprocess.Popen([str(_PYTHONW), str(Path(__file__)), "--restarted"])
+            subprocess.Popen([str(_PYTHONW), str(Path(__file__)), "--restarted"],
+                             creationflags=_NO_WINDOW)
         except OSError as e:
             logger.warning("Restart selhal (novou instanci nelze spustit): %s", e)
             return
