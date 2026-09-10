@@ -78,6 +78,13 @@ class _Server(ThreadingHTTPServer):
 
 
 def _make_handler(logger, on_restart=None):
+    import secrets
+
+    # Token nacteme jednou pri startu serveru (stejny, jaky vkladame do HTML).
+    # Sensitivni endpointy jim overuji volajiciho - cizi web v prohlizeci token
+    # nezna, takze i kdyz na 127.0.0.1 dosahne, neprojde.
+    token = core.get_control_token()
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes = b"") -> None:
             self.send_response(code)
@@ -87,10 +94,23 @@ def _make_handler(logger, on_restart=None):
             if body:
                 self.wfile.write(body)
 
+        def _token_ok(self, provided) -> bool:
+            """Bezpecne porovnani tokenu (konstantni cas). Prazdny = neplatny."""
+            return bool(provided) and secrets.compare_digest(str(provided), token)
+
         def _rewrite(self):
             _rewrite_html(logger)
 
         def do_GET(self):  # noqa: N802
+            q = parse_qs(urlparse(self.path).query)
+            # /ping a /refresh_status jsou neskodne (jen stav/schopnosti) - bez tokenu.
+            # Vse ostatni (stahovani, config) vyzaduje platny token.
+            if not (self.path.startswith("/ping")
+                    or self.path.startswith("/refresh_status")):
+                if not self._token_ok((q.get("token") or [None])[0]):
+                    self._send(403, b'{"ok":false,"error":"forbidden"}')
+                    return
+
             if self.path.startswith("/refresh_status"):
                 # Stav progresivniho refreshe (stranka podle nej prenacita).
                 with _refresh_lock:
@@ -99,7 +119,6 @@ def _make_handler(logger, on_restart=None):
             elif self.path.startswith("/refresh"):
                 # ?until=YYYY-MM-DD -> progresivne obnovi vsechny tydny od tohoto
                 # tydne az po zobrazeny (zobrazeny prvni). Bez parametru = bezne okno.
-                q = parse_qs(urlparse(self.path).query)
                 until = (q.get("until") or [None])[0]
                 if until:
                     try:
@@ -114,7 +133,6 @@ def _make_handler(logger, on_restart=None):
                     self._send(200, b'{"ok":true}' if ok else b'{"ok":false}')
             elif self.path.startswith("/fetch_week"):
                 # ?monday=YYYY-MM-DD -> stahne dany tyden na vyzadani
-                q = parse_qs(urlparse(self.path).query)
                 md = (q.get("monday") or [None])[0]
                 ok = False
                 if md:
@@ -148,6 +166,9 @@ def _make_handler(logger, on_restart=None):
                 status = "failed"
                 try:
                     p = json.loads(raw.decode("utf-8"))
+                    if not self._token_ok(p.get("token")):
+                        self._send(403, b'{"ok":false,"error":"forbidden"}')
+                        return
                     status = core.save_note(
                         str(p.get("date")), int(p.get("period")), str(p.get("text") or "")
                     )
@@ -170,7 +191,10 @@ def _make_handler(logger, on_restart=None):
                 raw = self.rfile.read(length) if length else b"{}"
                 try:
                     changes = json.loads(raw.decode("utf-8"))
-                    vals = core.save_config_values(changes if isinstance(changes, dict) else {})
+                    if not (isinstance(changes, dict) and self._token_ok(changes.get("token"))):
+                        self._send(403, b'{"ok":false,"error":"forbidden"}')
+                        return
+                    vals = core.save_config_values(changes)
                     self._send(200, json.dumps({"ok": True, "config": vals}).encode())
                     # Po odeslani odpovedi restartovat (zmeny se ctou pri startu).
                     if on_restart is not None:

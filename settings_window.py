@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sys
 import urllib.request
+from urllib.parse import quote
 import tkinter as tk
 from tkinter import messagebox
 
@@ -60,8 +61,11 @@ def main() -> int:
         root.destroy()
         return 1
 
+    token = core.get_control_token()
     try:
-        cfg = _get_json(f"http://127.0.0.1:{port}/config").get("config", {})
+        cfg = _get_json(
+            f"http://127.0.0.1:{port}/config?token={quote(token)}"
+        ).get("config", {})
     except Exception as e:  # noqa: BLE001
         messagebox.showerror("Nastavení", f"Nepodařilo se načíst nastavení:\n{e}")
         root.destroy()
@@ -102,6 +106,7 @@ def main() -> int:
             "open_folders": v_folders.get(),
             "auto_update": v_auto.get(),
             "folders_base": e_base.get().strip(),
+            "token": token,
         }
         status.config(text="Ukládám…")
         root.update_idletasks()

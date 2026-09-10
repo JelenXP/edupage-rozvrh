@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from edupage_api import Edupage
 from edupage_api.login import TwoFactorLogin
@@ -36,6 +38,50 @@ NOTE_QUEUE_FILE = CACHE_DIR / "note_queue.json"
 
 # Videne znamky (podle event_id) - pro notifikace na NOVE znamky.
 GRADES_SEEN_FILE = CACHE_DIR / "grades_seen.json"
+
+# Token lokalniho control serveru. Nahodny retezec ulozeny ve sdilene cache
+# slozce - zna ho jen lokalni uzivatel a stranka rozvrhu (vkladame ho do HTML).
+# Server jim overuje pozadavky, takze cizi web otevreny v prohlizeci nemuze
+# volat sensitivni endpointy (poznamky/nastaveni/config), i kdyz na 127.0.0.1
+# dosahne. Sdileny obema Windows ucty (spolecna slozka).
+CONTROL_TOKEN_FILE = CACHE_DIR / "control_token.txt"
+
+
+def _tmp_path(path: Path, ext: str) -> Path:
+    """Jedinecna cesta k docasnemu souboru (PID + nahodne uuid).
+
+    Nahodna cast brani KOLIZI mezi soubeznymi zapisy v ramci JEDNOHO procesu
+    (fetch vlakno, vlakna control serveru, worker refreshe) - jinak by dve
+    vlakna se stejnym PID pouzila stejny temp soubor a jeden zapis by se ztratil.
+    """
+    return path.with_suffix(f".{os.getpid()}.{uuid4().hex}.{ext}")
+
+
+def get_control_token() -> str:
+    """Vrati (a pri prvnim volani vytvori) token control serveru.
+
+    Token je nahodny retezec ulozeny v cache slozce. Cizi web v prohlizeci ho
+    neuhadne, takze nemuze volat sensitivni endpointy. Pri soubehu dvou procesu
+    se sjednoti na te verzi, ktera nakonec zustala na disku (re-read po zapisu).
+    """
+    try:
+        tok = CONTROL_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        if tok:
+            return tok
+    except OSError:
+        pass
+    tok = secrets.token_urlsafe(32)
+    try:
+        CONTROL_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _tmp_path(CONTROL_TOKEN_FILE, "tmp")
+        tmp.write_text(tok, encoding="utf-8")
+        os.replace(tmp, CONTROL_TOKEN_FILE)
+    except OSError:
+        return tok  # nejde ulozit - aspon v ramci tohoto behu drz jednu hodnotu
+    try:  # re-read: kdyz jiny proces zapsal soucasne, prevezmi viteze z disku
+        return CONTROL_TOKEN_FILE.read_text(encoding="utf-8").strip() or tok
+    except OSError:
+        return tok
 
 # Config: nejdriv per-user (v profilu uctu), jinak vedle skriptu (sdilena slozka).
 # Diky tomu muze z JEDNE sdilene slozky s kodem bezet vic Windows uctu, kazdy se
@@ -167,7 +213,7 @@ CONFIG_DEFAULTS = {
 def _write_config(path: Path, data: dict) -> None:
     """Atomicky ulozi config (zachova existujici hodnoty i poradi klicu)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".{os.getpid()}.cfgtmp")
+    tmp = _tmp_path(path, "cfgtmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, path)
 
@@ -604,7 +650,7 @@ def _load_grades_seen() -> list:
 
 def _write_grades_seen(ids: list) -> None:
     GRADES_SEEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = GRADES_SEEN_FILE.with_suffix(f".{os.getpid()}.tmp")
+    tmp = _tmp_path(GRADES_SEEN_FILE, "tmp")
     tmp.write_text(json.dumps(ids, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, GRADES_SEEN_FILE)
 
@@ -764,7 +810,7 @@ def _write_payload(
         "base": base,
         "fetched_weeks": fetched_weeks,
     }
-    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp = _tmp_path(path, "tmp")
     tmp.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -774,7 +820,7 @@ def _write_payload(
     if path.exists():
         try:
             backup = _backup_path(path)
-            btmp = backup.with_suffix(f".{os.getpid()}.baktmp")
+            btmp = _tmp_path(backup, "baktmp")
             btmp.write_bytes(path.read_bytes())
             os.replace(btmp, backup)
         except OSError:
@@ -1082,7 +1128,7 @@ def load_note_queue(path: Path = NOTE_QUEUE_FILE) -> dict:
 
 def _write_note_queue(queue: dict, path: Path = NOTE_QUEUE_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp = _tmp_path(path, "tmp")
     tmp.write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, path)
 

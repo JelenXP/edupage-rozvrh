@@ -183,6 +183,7 @@ const FETCHED_AT = "__FETCHED_AT__";
 const PENDING = __PENDING__;  // probiha stahovani aktualnich dat na pozadi
 const PORTS = __PORTS__;      // porty lokalniho control serveru (tlacitko Aktualizovat)
 const FETCHED_WEEKS = __FETCHED_WEEKS__;  // pondelky uz stazenych tydnu
+const TOKEN = __TOKEN__;      // token control serveru (overuje sensitivni pozadavky)
 
 let weekFetching = false;
 let editing = null;  // "datum#perioda" hodiny, u ktere je otevreny editor poznamky
@@ -222,7 +223,7 @@ async function postNote(d, p, text) {
   for (const port of await noteCapablePorts()) {
     try {
       const r = await fetch(`http://127.0.0.1:${port}/save_note`,
-        { method: "POST", body: JSON.stringify({ date: d, period: p, text }) });
+        { method: "POST", body: JSON.stringify({ date: d, period: p, text, token: TOKEN }) });
       if (r.ok) {
         const j = await r.json().catch(() => ({ ok: false }));
         const val = text.trim() ? text : null;
@@ -256,7 +257,7 @@ async function ensureWeekFetched(mondayStr) {
   if (el) el.textContent = "· načítám týden…";
   for (const p of await noteCapablePorts()) {
     try {
-      const r = await fetch(`http://127.0.0.1:${p}/fetch_week?monday=${mondayStr}`,
+      const r = await fetch(`http://127.0.0.1:${p}/fetch_week?monday=${mondayStr}&token=${encodeURIComponent(TOKEN)}`,
                             { mode: "cors" });
       if (!r.ok) continue;
       const j = await r.json().catch(() => ({}));
@@ -277,7 +278,7 @@ async function doRefresh() {
   const until = fmt(current);
   for (const p of await noteCapablePorts()) {
     try {
-      const r = await fetch(`http://127.0.0.1:${p}/refresh?until=${until}`, { mode: "cors" });
+      const r = await fetch(`http://127.0.0.1:${p}/refresh?until=${until}&token=${encodeURIComponent(TOKEN)}`, { mode: "cors" });
       if (!r.ok) continue;
       const j = await r.json().catch(() => ({}));
       if (j.ok) {
@@ -646,7 +647,8 @@ async function openSettings() {
   }
   modal.dataset.port = p;
   try {
-    const r = await fetch("http://127.0.0.1:" + p + "/config", { mode: "cors" });
+    const r = await fetch("http://127.0.0.1:" + p + "/config?token=" +
+                          encodeURIComponent(TOKEN), { mode: "cors" });
     const c = (await r.json()).config || {};
     for (const k of SET_KEYS) {
       const el = document.getElementById("s_" + k);
@@ -664,7 +666,7 @@ function closeSettings() { document.getElementById("settingsModal").hidden = tru
 async function saveSettings() {
   const modal = document.getElementById("settingsModal");
   const status = document.getElementById("settingsStatus");
-  const body = { folders_base: document.getElementById("s_folders_base").value.trim() };
+  const body = { folders_base: document.getElementById("s_folders_base").value.trim(), token: TOKEN };
   for (const k of SET_KEYS) body[k] = document.getElementById("s_" + k).checked;
   status.textContent = "Ukládám…";
   try {
@@ -713,6 +715,7 @@ def generate_html(
         .replace("__PORTS__", json.dumps(
             list(range(core.CONTROL_PORT_BASE,
                        core.CONTROL_PORT_BASE + core.CONTROL_PORT_COUNT))))
+        .replace("__TOKEN__", json.dumps(core.get_control_token()))
     )
 
 
@@ -722,7 +725,7 @@ def _write_html(pending: bool) -> None:
         core.load_cache(), core.load_assignments(), core.load_fetched_at(), pending
     )
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUTPUT_FILE.with_suffix(f".{os.getpid()}.tmp")
+    tmp = core._tmp_path(OUTPUT_FILE, "tmp")
     tmp.write_text(html, encoding="utf-8")
     os.replace(tmp, OUTPUT_FILE)  # atomicky, aby reload necetl rozepsany soubor
 
