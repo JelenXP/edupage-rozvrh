@@ -723,44 +723,43 @@ def fetch_week(monday: date) -> bool:
     return True
 
 
-def refresh_through(target_monday: date) -> bool:
-    """Stahne a slouci VSECHNY tydny od tohoto tydne az po `target_monday` (vcetne).
+def refresh_weeks(target_monday: date) -> list[date]:
+    """Seznam pondelku k obnove pro tlacitko ⟳ (progresivni refresh).
 
-    Pouziva UI tlacitko "Aktualizovat": obnovi souvisly rozsah do zobrazeneho
-    tydne (vyplni i mezery a prepise zastarale tydny za beznym oknem). Kdyz je
-    cil uvnitr/pred beznym oknem, chova se jako `refresh_cache` (obnovi okno).
-    Tise; pri neuspechu cache neprepisuje. Vrati True pri uspechu.
+    Rozsah = od tohoto tydne po pozdejsi z (bezne okno, cilovy tyden). Diky tomu
+    ⟳ vzdy obnovi nejblizsi tydny (bezne okno = tento + DAYS_AHEAD dopredu) a
+    navic vse az po zobrazeny tyden, kdyz je dal. Zobrazeny tyden je PRVNI
+    (stahne se hned, aby se objevil skoro okamzite), zbytek chronologicky.
     """
     start, win_end = _week_aligned_range()
-    target_monday = target_monday - timedelta(days=target_monday.weekday())  # zarovnat na pondeli
-    # Konec = patek pozdejsiho z (bezne okno, cilovy tyden). Cil v minulosti -> jen bezne okno.
-    end = win_end if target_monday <= start else max(win_end, target_monday + timedelta(days=4))
+    target = target_monday - timedelta(days=target_monday.weekday())
+    end = win_end if target <= start else max(win_end, target + timedelta(days=4))
 
-    try:
-        edupage = get_session()
-    except Exception:  # noqa: BLE001 - offline / config / 2FA
-        return False
+    weeks: list[date] = []
+    d = start
+    while d <= end:
+        weeks.append(d)
+        d += timedelta(days=7)
+    if target in weeks:  # zobrazeny tyden stahnout prvni
+        weeks.remove(target)
+        weeks.insert(0, target)
+    return weeks
 
-    days = (end - start).days
 
-    def _flush_and_fetch(ep):
-        flush_note_queue(ep)
-        return fetch_schedule(ep, start=start, days_ahead=days)
+def fetch_week_with(edupage: Edupage, monday: date) -> bool:
+    """Stahne + slouci JEDEN tyden pomoci uz prihlaseneho `edupage`.
 
-    entries = _flush_and_fetch(edupage)
+    Pro progresivni ⟳ (stahujeme tyden po tydnu a po kazdem prepiseme HTML, aby
+    se vysledky objevovaly postupne). Vrati True pri uspesnem ulozeni.
+    """
+    monday = monday - timedelta(days=monday.weekday())
+    friday = monday + timedelta(days=4)
+    entries = fetch_schedule(edupage, start=monday, days_ahead=4)
     if not entries:
-        # Mozna vyprsela drzena session -> jeden pokus s cerstvym prihlasenim.
-        try:
-            edupage = get_session(force_new=True)
-        except Exception:  # noqa: BLE001
-            return False
-        entries = _flush_and_fetch(edupage)
-        if not entries:
-            return False
-
+        return False
     assignments = fetch_assignments(edupage)
     try:
-        persist_cache(entries, assignments, refresh_start=start, refresh_end=end)
+        persist_cache(entries, assignments, refresh_start=monday, refresh_end=friday, path=CACHE_FILE)
     except OSError:
         return False
     return True

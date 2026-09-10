@@ -203,18 +203,62 @@ async function doRefresh() {
   const btn = document.getElementById("refresh");
   el.textContent = "· aktualizuji…";
   btn.disabled = true;
-  // Obnovit vsechny tydny od tohoto tydne az po zobrazeny (vcetne mezer).
+  // Spustit progresivni refresh: obnovi vsechny tydny od tohoto tydne az po
+  // zobrazeny (zobrazeny prvni). Vysledky pribyvaji postupne (viz pollRefresh).
   const until = fmt(current);
   for (const p of await noteCapablePorts()) {
     try {
       const r = await fetch(`http://127.0.0.1:${p}/refresh?until=${until}`, { mode: "cors" });
       if (!r.ok) continue;
       const j = await r.json().catch(() => ({}));
-      if (j.ok) { location.reload(); return; }  // stazeno -> prenacti
+      if (j.ok) {
+        try {
+          sessionStorage.setItem("refPort", p);
+          sessionStorage.setItem("refDone", "0");
+        } catch (e) {}
+        pollRefresh(p);
+        return;
+      }
     } catch (e) { /* zkus dalsi port */ }
   }
   btn.disabled = false;
   el.textContent = "· aktualizace se nezdařila (jsi offline?)";
+}
+
+// Sleduje stav progresivniho refreshe a po kazdem dokoncenem tydnu prenacte
+// stranku (nove stazene tydny se tak objevuji postupne). Stav prezije reload
+// v sessionStorage (refPort/refDone), takze polling po prenacteni pokracuje.
+async function pollRefresh(p) {
+  const el = document.getElementById("updated");
+  const btn = document.getElementById("refresh");
+  if (btn) btn.disabled = true;
+  let lastDone = 0;
+  try { lastDone = +(sessionStorage.getItem("refDone") || 0); } catch (e) {}
+  try {
+    const r = await fetch(`http://127.0.0.1:${p}/refresh_status`, { mode: "cors" });
+    const st = await r.json();
+    if (el && st.total) {
+      el.textContent = st.active
+        ? `· aktualizuji… (${st.done}/${st.total} týdnů)`
+        : `· aktualizováno (${st.done}/${st.total} týdnů)`;
+    }
+    if (st.done > lastDone || !st.active) {
+      // Novy tyden hotovy (nebo konec) -> ukazat ho (prenacist).
+      try { sessionStorage.setItem("refDone", st.done); } catch (e) {}
+      if (!st.active) {
+        try { sessionStorage.removeItem("refPort"); sessionStorage.removeItem("refDone"); } catch (e) {}
+      }
+      location.reload();
+      return;
+    }
+  } catch (e) {
+    // Server nedostupny -> ukoncit sledovani.
+    try { sessionStorage.removeItem("refPort"); sessionStorage.removeItem("refDone"); } catch (e) {}
+    if (btn) btn.disabled = false;
+    if (el) el.textContent = "· aktualizace se nezdařila (jsi offline?)";
+    return;
+  }
+  setTimeout(() => pollRefresh(p), 800);
 }
 
 function initStatus() {
@@ -456,6 +500,14 @@ document.getElementById("today").onclick = () => {
 document.getElementById("refresh").onclick = doRefresh;
 render();
 initStatus();
+
+// Kdyz probihal progresivni refresh, po prenacteni pokracuj ve sledovani.
+(function () {
+  try {
+    const rp = sessionStorage.getItem("refPort");
+    if (rp !== null) pollRefresh(+rp);
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>

@@ -17,6 +17,59 @@ from urllib.parse import parse_qs, urlparse
 import edupage_fetch as core
 
 
+# --- Progresivni refresh (tlacitko ⟳) ----------------------------------------
+# Refresh bezi na pozadi a stahuje tyden po tydnu (zobrazeny prvni). Stav sleduje
+# stranka pres /refresh_status a po kazdem dokoncenem tydnu se prenacte, takze
+# vysledky pribyvaji postupne misto cekani na cely rozsah.
+_refresh_lock = threading.Lock()
+_refresh_state = {"active": False, "done": 0, "total": 0}
+
+
+def _rewrite_html(logger) -> None:
+    try:
+        import show_timetable
+        show_timetable._write_html(pending=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Prepsani rozvrhu selhalo: %s", e)
+
+
+def _start_progressive(target_monday, logger) -> None:
+    """Spusti progresivni refresh na pozadi (pokud uz nebezi)."""
+    with _refresh_lock:
+        if _refresh_state["active"]:
+            return  # uz bezi - stranka jen doceka pres /refresh_status
+        weeks = core.refresh_weeks(target_monday)
+        _refresh_state.update(active=True, done=0, total=len(weeks))
+
+    def worker() -> None:
+        try:
+            try:
+                edupage = core.get_session()
+            except Exception as e:  # noqa: BLE001 - offline / 2FA
+                logger.warning("Refresh: prihlaseni selhalo: %s", e)
+                return
+            try:
+                core.flush_note_queue(edupage)
+            except Exception:  # noqa: BLE001
+                pass
+            for w in weeks:
+                try:
+                    if not core.fetch_week_with(edupage, w):
+                        # mozna vyprsela session -> jeden pokus s cerstvym prihlasenim
+                        edupage = core.get_session(force_new=True)
+                        core.fetch_week_with(edupage, w)
+                except Exception as e:  # noqa: BLE001 - jeden tyden nesmi shodit refresh
+                    logger.warning("Refresh tydne %s selhal: %s", w, e)
+                with _refresh_lock:
+                    _refresh_state["done"] += 1
+                _rewrite_html(logger)  # po kazdem tydnu prepsat HTML (stranka se prenacte)
+        finally:
+            with _refresh_lock:
+                _refresh_state["active"] = False
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 class _Server(ThreadingHTTPServer):
     # NEsdilet port: kdyz uz na nem nekdo naslouchá (napr. daemon druheho
     # Windows uctu), bind selze a zkusi se dalsi port. Diky tomu kazdy ucet
@@ -35,28 +88,30 @@ def _make_handler(logger):
                 self.wfile.write(body)
 
         def _rewrite(self):
-            try:
-                import show_timetable
-                show_timetable._write_html(pending=False)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Prepsani rozvrhu selhalo: %s", e)
+            _rewrite_html(logger)
 
         def do_GET(self):  # noqa: N802
-            if self.path.startswith("/refresh"):
-                # ?until=YYYY-MM-DD -> obnovi vsechny tydny od tohoto tydne az po
-                # zobrazeny (vcetne mezer); bez parametru jen bezne okno.
+            if self.path.startswith("/refresh_status"):
+                # Stav progresivniho refreshe (stranka podle nej prenacita).
+                with _refresh_lock:
+                    st = dict(_refresh_state)
+                self._send(200, json.dumps(st).encode())
+            elif self.path.startswith("/refresh"):
+                # ?until=YYYY-MM-DD -> progresivne obnovi vsechny tydny od tohoto
+                # tydne az po zobrazeny (zobrazeny prvni). Bez parametru = bezne okno.
                 q = parse_qs(urlparse(self.path).query)
                 until = (q.get("until") or [None])[0]
                 if until:
                     try:
                         y, m, d = map(int, until.split("-"))
-                        ok = core.refresh_through(date(y, m, d))
+                        _start_progressive(date(y, m, d), logger)
+                        self._send(200, b'{"ok":true,"async":true}')
                     except (ValueError, TypeError):
-                        ok = False
+                        self._send(200, b'{"ok":false}')
                 else:
                     ok = core.refresh_cache()
-                self._rewrite()
-                self._send(200, b'{"ok":true}' if ok else b'{"ok":false}')
+                    self._rewrite()
+                    self._send(200, b'{"ok":true}' if ok else b'{"ok":false}')
             elif self.path.startswith("/fetch_week"):
                 # ?monday=YYYY-MM-DD -> stahne dany tyden na vyzadani
                 q = parse_qs(urlparse(self.path).query)
