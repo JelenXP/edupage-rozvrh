@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -45,6 +47,76 @@ GRADES_SEEN_FILE = CACHE_DIR / "grades_seen.json"
 # volat sensitivni endpointy (poznamky/nastaveni/config), i kdyz na 127.0.0.1
 # dosahne. Sdileny obema Windows ucty (spolecna slozka).
 CONTROL_TOKEN_FILE = CACHE_DIR / "control_token.txt"
+
+
+# Meziprocesni zamek kolem read-modify-write cache. Oba Windows ucty pisi do
+# stejne sdilene cache - bez zamku by soubezny fetch obou uctu mohl prepsat
+# vysledek toho druheho (lost update). Zamek je sdileny (v cache slozce).
+LOCK_FILE = CACHE_DIR / "schedule.lock"
+
+
+@contextmanager
+def _cache_lock(timeout: float = 10.0):
+    """Meziprocesni (a mezivlaknovy) exkluzivni zamek kolem zapisu cache.
+
+    Best-effort: kdyz se zamek nepodari ziskat do `timeout` sekund (napr. cizi
+    proces drzi dlouho, nebo OS zamky nepodporuje), pokracuje se BEZ nej - radeji
+    riskovat vzacny souboh nez natrvalo zaseknout fetch. Na Windows pouziva
+    msvcrt, jinde fcntl; zamek drzi OS a uvolni ho i pri padu procesu.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        import msvcrt
+    except ImportError:
+        msvcrt = None
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+
+    fd = None
+    locked = False
+    try:
+        try:
+            fd = os.open(str(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o644)
+        except OSError:
+            fd = None
+
+        if fd is not None and msvcrt is not None:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    locked = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.1)
+        elif fd is not None and fcntl is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                locked = True
+            except OSError:
+                pass
+
+        yield
+    finally:
+        if fd is not None:
+            if locked:
+                try:
+                    if msvcrt is not None:
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                    elif fcntl is not None:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _tmp_path(path: Path, ext: str) -> Path:
@@ -708,6 +780,18 @@ def fetch_new_grades(edupage: Edupage, logger=None) -> list[dict]:
     return [current[gid] for gid in new_ids]
 
 
+def _flush_note_queue_quiet(edupage: Edupage) -> None:
+    """Odesle offline frontu poznamek, ale zadna chyba nesmi shodit fetch.
+
+    (Napr. poskozena polozka fronty nebo necekana chyba site.) Pouziva se z
+    refresh_cache, kde neni logger - proto tise polykame.
+    """
+    try:
+        flush_note_queue(edupage)
+    except Exception:  # noqa: BLE001 - fronta nesmi shodit fetch/refresh
+        pass
+
+
 def refresh_cache() -> bool:
     """Stahne rozvrh + DU/testy a ulozi do cache. Vrati True pri uspechu.
 
@@ -719,7 +803,7 @@ def refresh_cache() -> bool:
     except Exception:  # noqa: BLE001 - config/2FA/offline; tise se vratime
         return False
 
-    flush_note_queue(edupage)  # nejdriv odeslat poznamky ulozene offline
+    _flush_note_queue_quiet(edupage)  # nejdriv odeslat poznamky ulozene offline
     entries = fetch_schedule(edupage)
     if not entries:
         # Mozna vyprsela drzena session -> jeden pokus s cerstvym prihlasenim.
@@ -727,7 +811,7 @@ def refresh_cache() -> bool:
             edupage = get_session(force_new=True)
         except Exception:  # noqa: BLE001 - offline / config / 2FA
             return False
-        flush_note_queue(edupage)
+        _flush_note_queue_quiet(edupage)
         entries = fetch_schedule(edupage)
         if not entries:
             return False
@@ -880,35 +964,38 @@ def persist_cache(
         if refresh_end is None:
             refresh_end = we
 
-    base = build_base(entries, load_base(path))
-    annotate_changes(entries, base)
-
     s, e = refresh_start.strftime("%Y-%m-%d"), refresh_end.strftime("%Y-%m-%d")
 
     def in_window(dstr: str) -> bool:
         return s <= dstr <= e
 
-    kept = [l for l in load_cache(path) if not in_window(l.get("date", ""))]
-    merged = kept + [asdict(x) for x in entries]
-    merged.sort(key=lambda l: (l.get("date", ""), l.get("period") or 0))
+    # Cele read-modify-write pod meziprocesnim zamkem, aby soubezny fetch
+    # druheho uctu neprepsal vysledek (nacteni stare cache -> slouceni -> zapis).
+    with _cache_lock():
+        base = build_base(entries, load_base(path))
+        annotate_changes(entries, base)
 
-    # fetch_assignments vraci VZDY vsechny DU/testy (nezavisle na okne), takze
-    # ruzna okna (napr. fetch_week na vzdaleny tyden) by jinak duplikovala
-    # polozky mimo dane okno. Slucujeme a de-duplikujeme podle obsahu.
-    kept_a = [a for a in load_assignments(path) if not in_window(a.get("date", ""))]
-    merged_a = []
-    seen_a = set()
-    for a in kept_a + [asdict(a) for a in (assignments or [])]:
-        key = (a.get("date"), a.get("subject"), a.get("kind"), a.get("title"))
-        if key in seen_a:
-            continue
-        seen_a.add(key)
-        merged_a.append(a)
+        kept = [l for l in load_cache(path) if not in_window(l.get("date", ""))]
+        merged = kept + [asdict(x) for x in entries]
+        merged.sort(key=lambda l: (l.get("date", ""), l.get("period") or 0))
 
-    weeks = sorted(
-        set(load_fetched_weeks(path)) | set(_mondays_in_range(refresh_start, refresh_end))
-    )
-    return _write_payload(merged, merged_a, base, weeks, path)
+        # fetch_assignments vraci VZDY vsechny DU/testy (nezavisle na okne), takze
+        # ruzna okna (napr. fetch_week na vzdaleny tyden) by jinak duplikovala
+        # polozky mimo dane okno. Slucujeme a de-duplikujeme podle obsahu.
+        kept_a = [a for a in load_assignments(path) if not in_window(a.get("date", ""))]
+        merged_a = []
+        seen_a = set()
+        for a in kept_a + [asdict(a) for a in (assignments or [])]:
+            key = (a.get("date"), a.get("subject"), a.get("kind"), a.get("title"))
+            if key in seen_a:
+                continue
+            seen_a.add(key)
+            merged_a.append(a)
+
+        weeks = sorted(
+            set(load_fetched_weeks(path)) | set(_mondays_in_range(refresh_start, refresh_end))
+        )
+        return _write_payload(merged, merged_a, base, weeks, path)
 
 
 def fetch_week(monday: date) -> bool:
@@ -1084,29 +1171,31 @@ def update_cached_note(
     """
     if not path.exists():
         return
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return
-    lessons = data.get("lessons", [])
-    val = text.strip() or None
-    changed = False
-    for l in lessons:
-        if l.get("date") == date_str and l.get("period") == period:
-            l["my_note"] = val
-            if pending:
-                l["note_pending"] = True
-            else:
-                l.pop("note_pending", None)
-            changed = True
-    if changed:
-        _write_payload(
-            lessons,
-            data.get("assignments", []),
-            data.get("base", {}),
-            data.get("fetched_weeks", []),
-            path,
-        )
+    # Pod zamkem, aby se read-modify-write nekrizil s fetchem (persist_cache).
+    with _cache_lock():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        lessons = data.get("lessons", [])
+        val = text.strip() or None
+        changed = False
+        for l in lessons:
+            if l.get("date") == date_str and l.get("period") == period:
+                l["my_note"] = val
+                if pending:
+                    l["note_pending"] = True
+                else:
+                    l.pop("note_pending", None)
+                changed = True
+        if changed:
+            _write_payload(
+                lessons,
+                data.get("assignments", []),
+                data.get("base", {}),
+                data.get("fetched_weeks", []),
+                path,
+            )
 
 
 # ---- Offline fronta poznamek -------------------------------------------------
