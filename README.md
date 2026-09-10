@@ -1,140 +1,198 @@
-# EduPage rozvrh – automatické stahování + otevírání složek
+# 📅 EduPage rozvrh
 
-Tiše běžící program na pozadí (Windows), který:
+> Tiše běžící Windows program na pozadí, který drží tvůj EduPage rozvrh vždy po ruce – i offline – a přidává věci, které EduPage neumí.
 
-1. **Stahuje rozvrh** na 3 týdny dopředu z EduPage (každou hodinu) do sdílené cache.
-2. **Otevírá složku předmětu** v Průzkumníku při začátku (nebo v průběhu) každé
-   hodiny – jen na účtu, kde to zapneš.
-3. **Zobrazuje toast notifikaci** na konci každé hodiny s údaji o další hodině
-   (vlastní okno vpravo nahoře, **mimo** notifikační centrum Windows). Zůstane
-   **1 minutu**, **zvýrazní změny** (předmět/učitel/učebna – stejně jako rozvrh)
-   a ukáže i **osobní poznámku** k hodině (zeleně).
+![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
+![Postaveno na](https://img.shields.io/badge/postaveno%20na-edupage--api-orange)
+![Údržba](https://img.shields.io/badge/auto--update-git-brightgreen)
 
-## Architektura
+Daemon každou hodinu stáhne rozvrh do sdílené cache, umí otevírat složky předmětů
+při začátku hodiny, ukazuje toast notifikaci s další hodinou, zobrazuje celý
+rozvrh v prohlížeči (funguje i offline) a nechá tě přímo v něm **číst i psát
+osobní poznámky k hodinám**. Nové verze kódu se rozdají všem uživatelům **samy
+přes git**.
 
-- **Sdílená cache:** `C:\Users\Public\edupage_schedule\schedule.json` – vidí ji
-  oba uživatelé. Fetch z domácího účtu tak drží rozvrh čerstvý i pro školní účet,
-  který může být ve škole offline.
-- **Jeden daemon, dva režimy** – řídí `config.json`:
-  - `"open_folders": false` → jen stahuje (domácí/programovací účet).
-  - `"open_folders": true` + `"folders_base"` → stahuje **a** otevírá složky (školní účet).
-  - `"notify_next_lesson": true` → na konci hodiny ukáže toast s další hodinou (školní účet).
-- Když stažení selže (offline), cache se **nepřepíše** → otevírání jede z posledního
-  dostupného rozvrhu. Neúspěšný pokus se navíc zopakuje už za 5 minut (ne až za hodinu).
-- **Rychlé stahování:** rozvrh se stahuje po 3denních oknech na málo requestů
-  (endpoint EduPage vrací max 3 dny na dotaz), CSRF token se řeší jen jednou.
-  Daemon si navíc **drží přihlášení** v paměti a znovupoužívá ho – aktualizace,
-  dotažení dalšího týdne i ukládání poznámek tak nečekají na opakované přihlašování.
-- **Ikona v liště** (tray): pravým klikem *Zobrazit rozvrh / Stáhnout teď /
-  Restart / Otevřít log / Ukončit*. **Restart** spustí novou instanci daemonu
-  (načte aktuální kód) a starou ukončí – hodí se po úpravě kódu.
-- Běží vždy **jen jedna instance** (pojistka proti dvojímu spuštění).
+---
 
-## Soubory
+## ✨ Funkce
+
+- 🕒 **Automatické stahování** rozvrhu na několik týdnů dopředu (každou hodinu) do
+  sdílené cache. Funguje **offline** – když spadne připojení, jede se z poslední
+  stažené verze a cache se nepřepíše.
+- 🗂️ **Otevírání složek předmětů** v Průzkumníku na začátku (nebo v průběhu)
+  hodiny – zapínatelné per účet.
+- 🔔 **Toast notifikace** na konci hodiny s další hodinou (vlastní okno, **mimo**
+  centrum oznámení Windows). Zůstane 1 minutu, **zvýrazní změny** a ukáže **poznámku**.
+- 📝 **Osobní poznámky k hodinám** – čtení i **zápis/úprava/mazání** přímo v
+  rozvrhu (ukládají se zpět do EduPage). Offline se zařadí do fronty a odešlou se,
+  až bude připojení.
+- 🟧 **DÚ a testy**, **suplování**, odpadlé/přesunuté hodiny a **celodenní události**
+  (svátky/volno) přímo v mřížce rozvrhu.
+- 🔍 **Detekce změn** proti „stálému" rozvrhu – zvýrazní se jen to, co se liší.
+- ⚡ **Rychlé stahování** – po 3denních oknech na málo requestů + znovupoužitá
+  přihlášená session (aktualizace i ukládání poznámek nečekají na login).
+- 🔄 **Auto-update z GitHubu** – daemon si sám stáhne novou verzi kódu a restartuje se.
+- 🖱️ **Ikona v liště** – *Zobrazit rozvrh / Stáhnout teď / Restart / Otevřít log / Ukončit*.
+
+---
+
+## 🚀 Instalace
+
+**Požadavky:** Windows, [Python 3.10+](https://www.python.org/downloads/) a
+[Git](https://git-scm.com/download/win).
+
+```bash
+git clone https://github.com/JelenXP/edupage-rozvrh.git
+cd edupage-rozvrh
+python -m pip install edupage-api pystray pillow
+```
+
+> `pystray` + `pillow` jsou jen pro ikonu v liště – bez nich daemon poběží taky,
+> jen bez ikony.
+
+Vytvoř si konfiguraci (uloží se mimo repo, do tvého profilu – hesla se nikdy
+necommitují):
+
+```bash
+python setup_user_config.py
+```
+
+Uprav `%LOCALAPPDATA%\edupage\config.json` (viz [Konfigurace](#️-konfigurace)) a
+zapni autostart:
+
+```bash
+python install_autostart.py
+```
+
+Hotovo – program teď běží po přihlášení do Windows a rozvrh máš vždy aktuální.
+
+---
+
+## ⚙️ Konfigurace
+
+Soubor `%LOCALAPPDATA%\edupage\config.json` (vzor je `config.example.json`):
+
+```json
+{
+  "username": "tve_uzivatelske_jmeno",
+  "password": "tveHeslo",
+  "subdomain": "gymxy",
+  "open_folders": false,
+  "folders_base": "C:\\cesta\\ke\\slozkam\\predmetu",
+  "notify_next_lesson": false,
+  "auto_update": true
+}
+```
+
+| Klíč | Popis |
+|------|-------|
+| `username`, `password` | Přihlašovací údaje do EduPage. |
+| `subdomain` | Poddoména školy (`https://<subdomain>.edupage.org`). |
+| `open_folders` | `true` → otevírá složku předmětu při hodině. |
+| `folders_base` | Kořenová složka s podsložkami předmětů (jen když `open_folders`). |
+| `notify_next_lesson` | `true` → toast s další hodinou na konci hodiny. |
+| `auto_update` | `true` → daemon se sám aktualizuje z gitu (doporučeno). |
+
+Volitelně `%LOCALAPPDATA%\edupage\subject_folders.json` – ruční mapování jen těch
+předmětů, jejichž složka se **nejmenuje stejně** jako předmět (zbytek se páruje 1:1).
+
+---
+
+## 🖥️ Použití
+
+- **Celý rozvrh:** `python show_timetable.py` (nebo v liště *Zobrazit rozvrh*,
+  případně dvojklik na ikonu). Mřížka s přepínáním týdnů, funguje offline. Otevře
+  se hned z cache a na pozadí se sám přenačte na aktuální data. Listovat dopředu
+  jde bez omezení – nestažený týden se **sám dotáhne**.
+- **Poznámky:** klikni na „＋ poznámka" (nebo na existující zelený text) u hodiny,
+  napiš text a **Ulož**. Uloží se zpět do EduPage; offline se zařadí do fronty a
+  ukáže s odznakem „⏳ čeká na odeslání".
+- **Ruční stažení:** tlačítko *⟳ Aktualizovat* v rozvrhu nebo *Stáhnout teď* v liště.
+- **Jednorázový test:** `python edupage_daemon.py --once`
+- **Log:** `C:\Users\Public\edupage_schedule\daemon.log`
+- **Zrušení autostartu:** `python uninstall_autostart.py`
+
+Běžící daemon je ve Správci úloh jako `pythonw.exe`.
+
+---
+
+## 🔄 Auto-update
+
+Daemon si při startu a jednou za hodinu udělá `git pull`; když přišly změny,
+**sám se restartuje** na nový kód. Stačí tedy vydat novou verzi a všem se sama
+nasadí (do hodiny, nebo hned po restartu jejich daemonu):
+
+```bash
+git commit -am "popis změny"
+git push
+```
+
+- **Bezpečné pro vývoj:** update proběhne jen když je pracovní strom **čistý** a
+  remote je **napřed** (fast-forward). Rozdělané nebo nepushnuté změny se
+  nepřepíšou – auto-update se přeskočí.
+- **Vypnutí:** `"auto_update": false` v configu.
+
+---
+
+## 🏫 Sdílená složka / dva účty na jednom PC
+
+Projekt umí běžet z **jedné složky s kódem pro víc Windows účtů** (např. domácí +
+školní účet). Kód je společný, každý účet má **vlastní config** ve svém profilu
+(`%LOCALAPPDATA%\edupage\`), takže se nic nekopíruje.
+
+<details>
+<summary>Nastavení druhého (např. školního) účtu</summary>
+
+1. Knihovny pro Python daného účtu: `python -m pip install edupage-api pystray pillow`
+2. `python C:\Programování\edupage\setup_user_config.py`
+3. Uprav `%LOCALAPPDATA%\edupage\config.json` (typicky `open_folders: true`,
+   `folders_base`, `notify_next_lesson: true`) a případně `subject_folders.json`.
+4. `python C:\Programování\edupage\install_autostart.py`
+5. Ukonči starý daemon (Správce úloh → `pythonw.exe`) nebo restartuj PC.
+
+**Sdílená cache:** `C:\Users\Public\edupage_schedule\schedule.json` vidí oba účty –
+fetch z jednoho účtu tak drží rozvrh čerstvý i pro druhý (i když je zrovna offline).
+</details>
+
+---
+
+## 📁 Struktura projektu
 
 | Soubor | Popis |
 |--------|-------|
-| `edupage_fetch.py` | Jádro: config, přihlášení, stažení, cache. |
-| `folder_opener.py` | Mapování předmět→složka, výběr probíhající hodiny, otevření. |
-| `notifier.py` | Logika „další hodina" + text zprávy. |
-| `show_toast.py` | Vlastní toast okno (mimo notifikační centrum). |
-| `tray_icon.py` | Ikona v systémové liště (volitelné, potřebuje `pystray`+`pillow`). |
-| `show_timetable.py` | Vygeneruje a otevře celý rozvrh jako mřížku v prohlížeči (offline, přepínání týdnů). |
+| `edupage_daemon.py` | Trvalý běh: fetch, otevírání složek, notifikace, ikona v liště. |
+| `edupage_fetch.py` | Jádro: config, přihlášení, stažení, cache, poznámky. |
 | `control_server.py` | Lokální server (127.0.0.1) pro *Aktualizovat*, dotažení týdnů a ukládání poznámek. |
-| `edupage_daemon.py` | Trvalý běh: fetch (ve vlákně) + kontrola složek a notifikace po minutě, ikona v liště. |
+| `show_timetable.py` | Vygeneruje a otevře rozvrh jako mřížku v prohlížeči (offline). |
+| `show_toast.py` | Vlastní toast okno mimo centrum oznámení. |
+| `notifier.py` | Logika „další hodina" + obsah notifikace. |
+| `folder_opener.py` | Mapování předmět→složka a otevření probíhající hodiny. |
+| `tray_icon.py` | Ikona v systémové liště (volitelné, `pystray` + `pillow`). |
+| `self_update.py` | Auto-aktualizace kódu z gitu. |
+| `setup_user_config.py` | Připraví per-user config v `%LOCALAPPDATA%\edupage\`. |
 | `install_autostart.py` / `uninstall_autostart.py` | (Od)registrace autostartu. |
-| `setup_user_config.py` | Připraví per-user config (`%LOCALAPPDATA%\edupage\`) pro běh ze sdílené složky. |
-| `config.json` | Tvoje údaje (vytvoříš z `config.example.json`). Necommituje se. |
-| `subject_folders.json` | Ruční mapování výjimek (z `subject_folders.example.json`). |
+| `config.example.json`, `subject_folders.example.json` | Vzory konfigurace. |
 
-## Nastavení – domácí (tento) účet
+---
 
-Jen stahování, ať je rozvrh vždy čerstvý.
+## 🛠️ Řešení potíží
 
-1. `config.json` už máš. Zkontroluj, že obsahuje `"open_folders": false`.
-2. (Volitelně) ikona v liště: `python -m pip install pystray pillow`
-3. Autostart:
-   ```
-   python install_autostart.py
-   ```
+- **Mizí poznámky / „＋ poznámka"?** Nejspíš běží daemon jiného účtu na **staré
+  verzi kódu** a přepisuje sdílenou cache. Restartuj jeho daemon (Správce úloh →
+  `pythonw.exe`, nebo restart PC). Ukládání poznámek stránka posílá jen na daemon,
+  který je umí (podle `/ping`).
+- **Rozvrh se neaktualizuje:** mrkni do logu
+  `C:\Users\Public\edupage_schedule\daemon.log`. Neúspěšné stažení (offline) se
+  automaticky zopakuje za 5 minut.
+- **Daemon neběží:** ověř `pythonw.exe` ve Správci úloh; jinak spusť ručně
+  `pythonw edupage_daemon.py` nebo znovu `python install_autostart.py`.
+- **Dvojfázové ověření (2FA):** účty s 2FA zatím nejsou podporované.
 
-## Nastavení – školní účet (otevírání složek)
+---
 
-**Žádné kopírování kódu.** Školní účet spouští daemon přímo ze **sdílené složky**
-`C:\Programování\edupage` (má na ni práva pro čtení). Každý účet má vlastní config
-ve svém profilu (`%LOCALAPPDATA%\edupage\`), takže z jedné složky s kódem běží oba
-účty. **Změníš kód jednou → mají ho oba účty** (jen restart daemonů).
+## 📄 Licence
 
-Na **školním účtu** (přihlaš se do Windows jako `Škola`) proveď:
-
-1. **Nainstaluj knihovny** (pro Python školního účtu):
-   ```
-   python -m pip install edupage-api pystray pillow
-   ```
-   (`pystray` + `pillow` jsou pro ikonu v liště; bez nich daemon poběží bez ikony.)
-
-2. **Vytvoř per-user config** – jedním příkazem ze sdílené složky:
-   ```
-   python C:\Programování\edupage\setup_user_config.py
-   ```
-   Vytvoří `%LOCALAPPDATA%\edupage\config.json` a `subject_folders.json` ze vzorů.
-
-3. **Uprav** `%LOCALAPPDATA%\edupage\config.json`:
-   ```json
-   {
-     "username": "...",
-     "password": "...",
-     "subdomain": "...",
-     "open_folders": true,
-     "folders_base": "C:\\cesta\\ke\\slozkam\\predmetu",
-     "notify_next_lesson": true
-   }
-   ```
-   a případně `%LOCALAPPDATA%\edupage\subject_folders.json` (jen předměty, jejichž
-   složka se **nejmenuje stejně** jako předmět; zbytek 1:1).
-
-4. **Autostart ze sdílené složky:**
-   ```
-   python C:\Programování\edupage\install_autostart.py
-   ```
-   (Zástupce ve Startup bude ukazovat na `C:\Programování\edupage\edupage_daemon.py`.)
-
-5. **Ukonči starý daemon** (pokud běžel ze staré vlastní složky): Správce úloh →
-   ukončit `pythonw.exe`, nebo prostě **restartuj PC**. Po přihlášení se spustí nový
-   daemon ze sdílené složky. Starou složku s kódem už můžeš smazat.
-
-## Ověření a ovládání
-
-- **Zobrazit celý rozvrh:** `python show_timetable.py` (nebo v liště *Zobrazit rozvrh*,
-  případně dvojklik na ikonu) – mřížka (dny vlevo, hodiny nahoře), přepínání týdnů,
-  funguje offline. Otevře se **okamžitě** z cache (badge „aktualizuji…"), na pozadí
-  stáhne aktuální rozvrh a stránka se pak **sama přenačte** na aktuální data (zachová
-  zobrazený týden). Tlačítko **⟳ Aktualizovat** stáhne rozvrh na vyžádání (klepne na
-  lokální server daemonu na `127.0.0.1`). **Listovat dopředu jde bez omezení** – když
-  klikneš na týden, který ještě není stažený, **sám se dotáhne** (a v cache zůstane,
-  dokud ho běžné okno nedožene). Zobrazuje **DÚ/testy** (oranžově), **suplování**,
-  **celodenní události** (svátky/volno) roztažené přes celý den (např. „Svátek: Den
-  české státnosti") a **osobní poznámky k hodině** („Moje poznámka" z EduPage) –
-  **zeleně**, bez zvýraznění. Poznámku lze **přidat/upravit/smazat** přímo v rozvrhu:
-  klikni na „＋ poznámka" (nebo na existující zelený text) u dané hodiny, napiš text a
-  **Ulož** – uloží se zpět do EduPage (přes lokální server daemonu na `127.0.0.1`).
-  **Offline:** když zrovna není připojení, poznámka se uloží do **fronty**
-  (`note_queue.json`) a ukáže se zeleně s odznakem **„⏳ čeká na odeslání"**; daemon
-  ji sám odešle při nejbližším úspěšném přihlášení (hodinový fetch nebo *Aktualizovat*).
-- **Detekce změn:** z „čistých" (nezměněných) dnů se skládá **stálý rozvrh** (uloží se
-  do cache jako `base` a přetrvává). Efektivní rozvrh se proti němu porovnává a
-  **zvýrazní se jen to, co se liší** – jiný předmět → předmět, jiný učitel/učebna →
-  jen ten údaj. Odpadlé hodiny: přeškrtnutý předmět + „odpadá", přesunuté + „přesunuto".
-  Sudý/lichý týden (hodina/nic) nedělá falešná zvýraznění.
-- **Mizí poznámky / „＋ poznámka"?** Nejspíš běží daemon druhého Windows účtu na
-  **staré verzi kódu** (bez poznámek) a drží první control-port – přepisuje sdílenou
-  cache i HTML rozvrhu starou šablonou. Řešení: **zkopíruj aktuální soubory i na druhý
-  účet a jeho daemon restartuj** (Správce úloh → ukončit `pythonw.exe`, nebo restart
-  PC). Stránka sama posílá *Aktualizovat*/ukládání poznámek jen na daemon, který
-  poznámky umí (podle `/ping`), ale hodinový fetch starého daemonu umí cache dočasně
-  přepsat, dokud ho nedoženeš.
-- **Log:** `C:\Users\Public\edupage_schedule\daemon.log`
-- **Test jednoho stažení:** `python edupage_daemon.py --once`
-- **Autostart:** zástupce ve složce Startup (`shell:startup`), spouští se po přihlášení.
-- **Zrušení autostartu:** `python uninstall_autostart.py`
-- Běžící daemon je ve Správci úloh jako `pythonw.exe`.
+Osobní/školní hobby projekt – volně k použití a úpravám. Postaveno na knihovně
+[edupage-api](https://github.com/EduPage-API/edupage-api). Neoficiální nástroj,
+nijak nesouvisí s provozovatelem EduPage.
