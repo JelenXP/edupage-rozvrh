@@ -523,7 +523,7 @@ function cellHtml(items) {
 function render() {
   const days = [0, 1, 2, 3, 4].map(i => addDays(current, i));
   document.getElementById("range").textContent =
-    `Týden ${human(days[0])} – ${human(days[4])}${days[4].getFullYear()}`;
+    `Týden ${human(days[0])} – ${human(days[4])} ${days[4].getFullYear()}`;
 
   let html = "<table><thead><tr><th class='day'>Den</th>";
   periods.forEach(p => {

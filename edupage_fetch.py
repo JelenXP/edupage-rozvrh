@@ -770,8 +770,12 @@ def fetch_new_grades(edupage: Edupage, logger=None) -> list[dict]:
     first_run = not GRADES_SEEN_FILE.exists()
     new_ids = [gid for gid in current if gid not in seen]
 
+    # Ulozime jen aktualne existujici znamky (ne stalou unii) - jinak by seznam
+    # videnych rostl donekonecna. Kdyz ale get_grades() nic nevratilo (nejspis
+    # docasna chyba), seen NEMENIME, aby se pri pristim uspechu vsechny znamky
+    # neoznacily omylem jako nove.
     try:
-        _write_grades_seen(sorted(seen | set(current)))
+        _write_grades_seen(sorted(current) if current else sorted(seen))
     except OSError:
         pass
 

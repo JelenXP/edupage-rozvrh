@@ -265,6 +265,12 @@ def _show_toast(data: dict, logger: logging.Logger) -> None:
             creationflags=_NO_WINDOW,
         )
     except OSError as e:
+        # Toast se nespustil - smazat docasny soubor, at v %TEMP% nezustane
+        # (jinak ho normalne uklidi show_toast po precteni).
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
         logger.warning("Nepodarilo se zobrazit notifikaci: %s", e)
 
 
