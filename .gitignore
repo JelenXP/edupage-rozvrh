@@ -1,0 +1,11 @@
+# Prihlasovaci udaje - nikdy necommitovat
+config.json
+
+# Osobni mapovani predmetu
+subject_folders.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

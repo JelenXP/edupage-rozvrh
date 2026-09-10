@@ -1,0 +1,9 @@
+{
+  "username": "tve_uzivatelske_jmeno",
+  "password": "tveHeslo",
+  "subdomain": "gymxy",
+  "open_folders": false,
+  "folders_base": "C:\\Users\\skola\\Documents\\Skola",
+  "notify_next_lesson": false,
+  "auto_update": true
+}
