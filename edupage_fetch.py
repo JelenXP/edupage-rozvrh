@@ -77,6 +77,7 @@ class LessonEntry:
     changes: list[str]   # zmenena pole (suplovani): "subject"/"teacher"/"room"/"moved"
     strike_label: Optional[str] = None  # text u preskrtnute hodiny: "odpadá"/"přesunuto"
     all_day: bool = False  # celodenni udalost (svatek/volno) - v mrizce pres cely den
+    all_day_kind: Optional[str] = None  # "holiday" (svatek/prazdniny) nebo "event" (skolni akce)
     my_note: Optional[str] = None  # osobni poznamka k hodine ("Moje poznámka" v EduPage)
 
 
@@ -217,6 +218,19 @@ def _extract_my_note(l: dict) -> Optional[str]:
     return None
 
 
+def _all_day_kind(title: Optional[str]) -> str:
+    """Rozliseni celodenni udalosti kvuli barve: svatek/prazdniny/volno vs. skolni akce.
+
+    EduPage tituluje "Svátek: ...", "Prázdniny: ..." (drz zelene) a "Školní
+    událost: ..." apod. (jina barva). Neznamy titulek bereme jako skolni akci.
+    """
+    t = (title or "").strip()
+    for prefix in ("Svátek", "Prázdniny", "Volno", "Ředitelské"):
+        if t.startswith(prefix):
+            return "holiday"
+    return "event"
+
+
 def _parse_plan(plan: list, day: date, maps: tuple[dict, dict, dict]) -> list[LessonEntry]:
     """Rozparsuje syrovy denni plan vcetne zmen (suplovani) a odpadlych hodin."""
     subj_map, teach_map, room_map = maps
@@ -243,7 +257,7 @@ def _parse_plan(plan: list, day: date, maps: tuple[dict, dict, dict]) -> list[Le
             hdr_item = header[0].get("item") or {}
             header_text = header[0].get("text")
 
-        # Celodenni udalost (svatek / volno) - v mrizce pres cely den.
+        # Celodenni udalost (svatek / volno / skolni akce) - v mrizce pres cely den.
         if l.get("allday") or uni == "ad":
             title = header_text or (flags.get("event") or {}).get("name")
             out.append(
@@ -262,6 +276,7 @@ def _parse_plan(plan: list, day: date, maps: tuple[dict, dict, dict]) -> list[Le
                     changes=[],
                     strike_label=None,
                     all_day=True,
+                    all_day_kind=_all_day_kind(title),
                 )
             )
             continue

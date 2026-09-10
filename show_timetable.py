@@ -88,9 +88,13 @@ _TEMPLATE = r"""<!doctype html>
          font-weight: 700; }
   @media (prefers-color-scheme: dark) { .chg { background: #6b5310; color: #ffe9b0; } }
   .subject.chg { display: inline-block; }
-  .allday { text-align: center; font-weight: 600; background: #e7f0e7; color: #2f5d2f;
-            font-style: italic; }
-  @media (prefers-color-scheme: dark) { .allday { background: #223322; color: #b6e0b6; } }
+  .allday { text-align: center; font-weight: 600; font-style: italic; }
+  .allday.holiday { background: #e7f0e7; color: #2f5d2f; }   /* svatek / prazdniny */
+  .allday.event   { background: #ece4fb; color: #5b3a99; }   /* skolni / celodenni akce */
+  @media (prefers-color-scheme: dark) {
+    .allday.holiday { background: #223322; color: #b6e0b6; }
+    .allday.event   { background: #312046; color: #cbb4f2; }
+  }
   tr.today .day { background: #eaf1ff; }
 </style>
 </head>
@@ -350,9 +354,19 @@ LESSONS.forEach(l => {
 });
 
 // Celodenni udalosti (svatky / volno) podle data.
+// Druh celodenni udalosti (kvuli barve). Pouzije pole z backendu, jinak (starsi
+// cache bez pole) odvodi z textu: Svátek/Prázdniny/Volno = svatek, jinak akce.
+function allDayKind(l) {
+  if (l.all_day_kind) return l.all_day_kind;
+  const t = l.note || "";
+  return (t.startsWith("Svátek") || t.startsWith("Prázdniny") ||
+          t.startsWith("Volno") || t.startsWith("Ředitelské")) ? "holiday" : "event";
+}
+
 const allDayByDate = {};
 LESSONS.forEach(l => {
-  if (l.all_day) (allDayByDate[l.date] = allDayByDate[l.date] || []).push(l.note || "Volno");
+  if (l.all_day) (allDayByDate[l.date] = allDayByDate[l.date] || []).push(
+    { label: l.note || "Volno", kind: allDayKind(l) });
 });
 
 const todayMon = monday(new Date());
@@ -459,9 +473,12 @@ function render() {
 
     const events = allDayByDate[fmt(d)];
     if (events && events.length) {
-      // Celodenni udalost pres vsechny hodiny daneho dne.
-      const label = [...new Set(events)].map(esc).join(" · ");
-      html += `<td class='allday' colspan='${periods.length}'>${label}</td>`;
+      // Celodenni udalost pres vsechny hodiny daneho dne. Svatky/prazdniny zelene,
+      // skolni akce fialove; kdyz jsou v jednom dni obe, prevazi barva akce.
+      const uniq = [...new Map(events.map(e => [e.label, e])).values()];
+      const label = uniq.map(e => esc(e.label)).join(" · ");
+      const kind = uniq.some(e => e.kind === "event") ? "event" : "holiday";
+      html += `<td class='allday ${kind}' colspan='${periods.length}'>${label}</td>`;
     } else {
       periods.forEach(p => {
         const items = byKey[fmt(d) + "#" + p] || [];
