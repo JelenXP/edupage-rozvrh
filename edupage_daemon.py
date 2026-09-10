@@ -314,6 +314,7 @@ def run_loop(
     fetch_now_event: threading.Event,
     auto_update: bool = False,
     on_code_update=None,
+    on_first_fetch=None,
 ) -> None:
     """Hlavni smycka. Fetch bezi v samostatnem vlakne (neblokuje kontroly).
 
@@ -345,6 +346,9 @@ def run_loop(
             next_fetch_at = time.monotonic() + delay
             if not ok:
                 logger.info("Dalsi pokus o stazeni za %d min.", delay // 60)
+            elif on_first_fetch is not None:
+                on_first_fetch()
+                on_first_fetch = None
             fetch_thread = None
 
         if fetch_now_event.is_set():
@@ -453,11 +457,27 @@ def main(argv: list[str]) -> int:
     except Exception as e:  # noqa: BLE001 - server je volitelny
         logger.warning("Control server nespusten: %s", e)
 
+    # Pri uplne prvnim startu (cache jeste neexistuje) po prvnim fetchi otevrit
+    # rozvrh s nastavenim, aby uzivatel vedel, co si muze zapnout.
+    first_run = not core.CACHE_FILE.exists()
+
+    def _after_first_fetch():
+        if not first_run:
+            return
+        def _open():
+            try:
+                import show_timetable
+                show_timetable.open_timetable(refresh=False, show_settings=True)
+            except Exception:  # noqa: BLE001
+                pass
+        threading.Thread(target=_open, daemon=True).start()
+
     # Smycka bezi ve vlakne; hlavni vlakno drzi ikonu v liste (tray).
     loop_thread = threading.Thread(
         target=run_loop,
-        args=(logger, open_folders, notify, stop_event, fetch_now_event,
-              auto_update, _restart),
+        args=(logger, open_folders, notify, stop_event, fetch_now_event),
+        kwargs=dict(auto_update=auto_update, on_code_update=_restart,
+                    on_first_fetch=_after_first_fetch),
         daemon=True,
     )
     loop_thread.start()

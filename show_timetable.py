@@ -109,6 +109,7 @@ _TEMPLATE = r"""<!doctype html>
   }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45);
            display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .modal[hidden] { display: none; }
   .modal-card { background: #fff; color: #1a1a1a; border-radius: 14px; padding: 22px 24px;
                 width: min(460px, 92vw); box-shadow: 0 12px 40px rgba(0,0,0,.3); }
   .modal-card h2 { margin: 0 0 14px; font-size: 20px; }
@@ -596,7 +597,7 @@ initStatus();
 // nezahlti obrazovku. Krizek zavre aktualni a ukaze dalsi.
 const ANNOUNCEMENTS = [
   { id: "notify_grades_v1",
-    html: '✨ <b>Nová funkce:</b> notifikace na nové známky. Zapni v <b>⚙ Nastavení</b>.' },
+    html: '✨ <b>Nová funkce:</b> notifikace na nové známky. Zapni v <a href="#" onclick="openSettings();return false" style="color:inherit;text-decoration:underline"><b>⚙ Nastavení</b></a>.' },
 ];
 function annDismissed(id) {
   try { return !!localStorage.getItem("feat_" + id); } catch (e) { return false; }
@@ -683,6 +684,12 @@ document.getElementById("s_open_folders").onchange = toggleFoldersRow;
 document.getElementById("settingsModal").onclick = (e) => {
   if (e.target.id === "settingsModal") closeSettings();
 };
+
+// Pri prvnim startu (hash #settings=1) rovnou otevrit nastaveni.
+if (/settings=1/.test(location.hash)) {
+  history.replaceState(null, "", location.pathname + location.search);
+  openSettings();
+}
 </script>
 </body>
 </html>
@@ -720,7 +727,7 @@ def _write_html(pending: bool) -> None:
     os.replace(tmp, OUTPUT_FILE)  # atomicky, aby reload necetl rozepsany soubor
 
 
-def open_timetable(refresh: bool = False) -> Path:
+def open_timetable(refresh: bool = False, show_settings: bool = False) -> Path:
     """Zobrazi rozvrh hned z cache a (pri refresh) na pozadi stahne aktualni.
 
     Faze 1: okamzite vykresli posledni cache a otevre prohlizec (zadne cekani).
@@ -729,7 +736,8 @@ def open_timetable(refresh: bool = False) -> Path:
     """
     # Faze 1 - okamzite.
     _write_html(pending=refresh)
-    url = OUTPUT_FILE.as_uri() + "?v=" + str(int(time.time()))
+    frag = "#settings=1" if show_settings else ""
+    url = OUTPUT_FILE.as_uri() + "?v=" + str(int(time.time())) + frag
     webbrowser.open(url)
 
     # Faze 2 - stazeni na pozadi (blokuje tuto funkci, ne prohlizec).

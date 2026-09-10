@@ -63,8 +63,7 @@ necommitují):
 python setup_user_config.py
 ```
 
-Uprav `%LOCALAPPDATA%\edupage\config.json` (viz [Konfigurace](#️-konfigurace)) a
-zapni autostart:
+Zapni autostart:
 
 ```bash
 python install_autostart.py
@@ -72,9 +71,23 @@ python install_autostart.py
 
 Hotovo – program teď běží po přihlášení do Windows a rozvrh máš vždy aktuální.
 
+> **Při prvním spuštění** se automaticky otevře rozvrh s panelem **⚙ Nastavení**,
+> kde si klikáním zapneš notifikace, otevírání složek a další funkce – nemusíš
+> editovat žádný soubor.
+
 ---
 
 ## ⚙️ Konfigurace
+
+Nastavení změníš klikáním – **nemusíš editovat JSON ručně:**
+- v rozvrhu tlačítkem **⚙ Nastavení** (přepínače + cesta ke složkám),
+- nebo přes **ikonu v liště → Nastavení** (samostatné okno).
+
+Uložením se změny zapíšou do configu (hesla se nikdy nemění) a daemon se sám
+restartuje, aby se projevily.
+
+<details>
+<summary>Ruční editace configu (pokročilé)</summary>
 
 Soubor `%LOCALAPPDATA%\edupage\config.json` (vzor je `config.example.json`):
 
@@ -101,16 +114,11 @@ Soubor `%LOCALAPPDATA%\edupage\config.json` (vzor je `config.example.json`):
 | `notify_grades` | `true` → toast při nové známce (vpravo nahoře, 1 min / po odkliknutí). |
 | `auto_update` | `true` → daemon se sám aktualizuje z gitu (doporučeno). |
 
-> **Nemusíš editovat JSON ručně.** Nastavení změníš klikáním:
-> - v rozvrhu tlačítkem **⚙ Nastavení** (přepínače + cesta ke složkám),
-> - nebo přes **ikonu v liště → Nastavení** (samostatné okno).
->
-> Uložením se změny zapíšou do `config.json` (hesla se nikdy nemění) a daemon se
-> sám restartuje, aby se projevily.
-
 > **Nové klíče se doplní samy.** Chybějící volitelné klíče (např. `notify_grades`
 > po updatu) se při startu automaticky přidají do `config.json` s výchozí hodnotou
 > `false` – existující hodnoty ani pořadí se nemění, starý config se nerozbije.
+
+</details>
 
 Volitelně `%LOCALAPPDATA%\edupage\subject_folders.json` – ruční mapování jen těch
 předmětů, jejichž složka se **nejmenuje stejně** jako předmět (zbytek se páruje 1:1).
