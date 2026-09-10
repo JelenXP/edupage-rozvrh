@@ -222,5 +222,5 @@ fetch z jednoho účtu tak drží rozvrh čerstvý i pro druhý (i když je zrov
 
 Vydáno pod licencí **MIT** – viz [LICENSE](LICENSE). Volně k použití a úpravám.
 
-Postaveno na knihovně [edupage-api](https://github.com/EduPage-API/edupage-api).
+Postaveno na knihovně [edupage-api](https://github.com/EdupageAPI/edupage-api).
 Neoficiální nástroj, nijak nesouvisí s provozovatelem EduPage.
